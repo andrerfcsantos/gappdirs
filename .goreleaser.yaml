@@ -1,0 +1,23 @@
+version: 2
+
+project_name: gappdirs
+
+builds:
+  - skip: true
+
+source:
+  enabled: true
+  format: tar.gz
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: auto
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
