@@ -11,22 +11,22 @@ import (
 func platformUserDirs(appName string, cat category) ([]string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("gappdirs: resolve home directory: %w", err)
+		homeDir = "~"
 	}
 
 	libraryDir := filepath.Join(homeDir, "Library")
 	switch cat {
 	case categoryData:
-		return []string{filepath.Join(libraryDir, "Application Support", appName, "data")}, nil
+		return []string{filepath.Join(libraryDir, "Application Support", appName, "data")}, err
 	case categoryConfig:
-		return []string{filepath.Join(libraryDir, "Application Support", appName, "config")}, nil
+		return []string{filepath.Join(libraryDir, "Application Support", appName, "config")}, err
 	case categoryLog:
-		return []string{filepath.Join(libraryDir, "Logs", appName)}, nil
+		return []string{filepath.Join(libraryDir, "Logs", appName)}, err
 	case categoryCache:
-		return []string{filepath.Join(libraryDir, "Caches", appName)}, nil
-	default:
-		return nil, fmt.Errorf("gappdirs: unsupported category %d", cat)
+		return []string{filepath.Join(libraryDir, "Caches", appName)}, err
 	}
+
+	return nil, fmt.Errorf("gappdirs: unsupported category %d", cat)
 }
 
 func platformSystemDirs(appName string, cat category) ([]string, error) {

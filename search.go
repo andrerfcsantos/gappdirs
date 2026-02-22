@@ -8,95 +8,59 @@ import (
 	"strings"
 )
 
-// FindDataFileDirs returns data directories that contain filename.
-func (r *resolver) FindDataFileDirs(filename string) ([]string, error) {
-	ctx, err := r.scopedCtx()
-	if err != nil {
-		return nil, err
-	}
-	return scopedFindFileDirs(ctx, categoryData, filename)
+// FindDataFiles returns matching data file paths in precedence order.
+func (r *resolver) FindDataFiles(filename string) ([]string, error) {
+	return findExistingScopedFiles(r.ctx, categoryData, filename)
 }
 
-// FindConfigFileDirs returns config directories that contain filename.
-func (r *resolver) FindConfigFileDirs(filename string) ([]string, error) {
-	ctx, err := r.scopedCtx()
-	if err != nil {
-		return nil, err
-	}
-	return scopedFindFileDirs(ctx, categoryConfig, filename)
+// FindConfigFiles returns matching config file paths in precedence order.
+func (r *resolver) FindConfigFiles(filename string) ([]string, error) {
+	return findExistingScopedFiles(r.ctx, categoryConfig, filename)
 }
 
-// FindLogFileDirs returns log directories that contain filename.
-func (r *resolver) FindLogFileDirs(filename string) ([]string, error) {
-	ctx, err := r.scopedCtx()
-	if err != nil {
-		return nil, err
-	}
-	return scopedFindFileDirs(ctx, categoryLog, filename)
+// FindLogFiles returns matching log file paths in precedence order.
+func (r *resolver) FindLogFiles(filename string) ([]string, error) {
+	return findExistingScopedFiles(r.ctx, categoryLog, filename)
 }
 
-// FindCacheFileDirs returns cache directories that contain filename.
-func (r *resolver) FindCacheFileDirs(filename string) ([]string, error) {
-	ctx, err := r.scopedCtx()
-	if err != nil {
-		return nil, err
-	}
-	return scopedFindFileDirs(ctx, categoryCache, filename)
+// FindCacheFiles returns matching cache file paths in precedence order.
+func (r *resolver) FindCacheFiles(filename string) ([]string, error) {
+	return findExistingScopedFiles(r.ctx, categoryCache, filename)
 }
 
-// DataFile returns the first matching data file path by precedence.
-func (r *resolver) DataFile(filename string) (string, error) {
-	ctx, err := r.scopedCtx()
-	if err != nil {
-		return "", err
-	}
-	return scopedFile(ctx, categoryData, filename)
+// FindDataFile returns the first matching data file path by precedence.
+func (r *resolver) FindDataFile(filename string) (string, error) {
+	return findExistingScopedFile(r.ctx, categoryData, filename)
 }
 
-// ConfigFile returns the first matching config file path by precedence.
-func (r *resolver) ConfigFile(filename string) (string, error) {
-	ctx, err := r.scopedCtx()
-	if err != nil {
-		return "", err
-	}
-	return scopedFile(ctx, categoryConfig, filename)
+// FindConfigFile returns the first matching config file path by precedence.
+func (r *resolver) FindConfigFile(filename string) (string, error) {
+	return findExistingScopedFile(r.ctx, categoryConfig, filename)
 }
 
-// LogFile returns the first matching log file path by precedence.
-func (r *resolver) LogFile(filename string) (string, error) {
-	ctx, err := r.scopedCtx()
-	if err != nil {
-		return "", err
-	}
-	return scopedFile(ctx, categoryLog, filename)
+// FindLogFile returns the first matching log file path by precedence.
+func (r *resolver) FindLogFile(filename string) (string, error) {
+	return findExistingScopedFile(r.ctx, categoryLog, filename)
 }
 
-// CacheFile returns the first matching cache file path by precedence.
-func (r *resolver) CacheFile(filename string) (string, error) {
-	ctx, err := r.scopedCtx()
-	if err != nil {
-		return "", err
-	}
-	return scopedFile(ctx, categoryCache, filename)
+// FindCacheFile returns the first matching cache file path by precedence.
+func (r *resolver) FindCacheFile(filename string) (string, error) {
+	return findExistingScopedFile(r.ctx, categoryCache, filename)
 }
 
-func validateFilename(filename string) error {
+func normalizeFilename(base, filename string) (string, error) {
 	if strings.TrimSpace(filename) == "" {
-		return errors.New("gappdirs: filename is required")
+		return filename, errors.New("gappdirs: filename is required")
 	}
 	if filepath.IsAbs(filename) {
-		return fmt.Errorf("gappdirs: filename must be relative basename, got absolute path %q", filename)
+		rel, err := filepath.Rel(base, filename)
+		if err != nil {
+			return filename, fmt.Errorf("gappdirs: filename is an absolute path and it is not possible to get a relative path from %q to %q: %w", base, filename, err)
+		}
+
+		filename = rel
 	}
-	if filename == "." || filename == ".." {
-		return fmt.Errorf("gappdirs: invalid filename %q", filename)
-	}
-	if strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
-		return fmt.Errorf("gappdirs: filename must not include path separators: %q", filename)
-	}
-	if base := filepath.Base(filename); base != filename {
-		return fmt.Errorf("gappdirs: filename must be basename, got %q", filename)
-	}
-	return nil
+	return filename, nil
 }
 
 func regularFileExists(path string) (bool, error) {

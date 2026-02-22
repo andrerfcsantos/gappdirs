@@ -22,25 +22,25 @@ const (
 func platformUserDirs(appName string, cat category) ([]string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("gappdirs: resolve home directory: %w", err)
+		homeDir = "~"
 	}
 
 	switch cat {
 	case categoryData:
 		base := linuxEnvDirOrDefault("XDG_DATA_HOME", filepath.Join(homeDir, linuxDefaultDataHome))
-		return []string{filepath.Join(base, appName)}, nil
+		return []string{filepath.Join(base, appName)}, err
 	case categoryConfig:
 		base := linuxEnvDirOrDefault("XDG_CONFIG_HOME", filepath.Join(homeDir, linuxDefaultConfigHome))
-		return []string{filepath.Join(base, appName)}, nil
+		return []string{filepath.Join(base, appName)}, err
 	case categoryLog:
 		base := linuxEnvDirOrDefault("XDG_STATE_HOME", filepath.Join(homeDir, linuxDefaultStateHome))
-		return []string{filepath.Join(base, appName, "log")}, nil
+		return []string{filepath.Join(base, appName, "log")}, err
 	case categoryCache:
 		base := linuxEnvDirOrDefault("XDG_CACHE_HOME", filepath.Join(homeDir, linuxDefaultCacheHome))
-		return []string{filepath.Join(base, appName)}, nil
-	default:
-		return nil, fmt.Errorf("gappdirs: unsupported category %d", cat)
+		return []string{filepath.Join(base, appName)}, err
 	}
+
+	return nil, fmt.Errorf("gappdirs: unsupported category %d", cat)
 }
 
 func platformSystemDirs(appName string, cat category) ([]string, error) {

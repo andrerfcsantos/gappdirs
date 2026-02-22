@@ -3,7 +3,6 @@ package gappdirs
 import (
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -59,49 +58,21 @@ func categoryDirName(c category) string {
 	}
 }
 
-func validateCategory(c category) error {
-	switch c {
-	case categoryData, categoryConfig, categoryLog, categoryCache:
-		return nil
-	default:
-		return fmt.Errorf("gappdirs: unsupported category %d", c)
-	}
-}
-
-func normalizeAndDedupe(paths []string) ([]string, error) {
+func normalizePaths(paths []string) []string {
 	out := make([]string, 0, len(paths))
-	seen := make(map[string]struct{}, len(paths))
 
 	for _, path := range paths {
-		if strings.TrimSpace(path) == "" {
-			continue
-		}
-
-		absPath, err := normalizeAbsolutePath(path)
-		if err != nil {
-			return nil, err
-		}
-
-		key := absPath
-		if runtime.GOOS == "windows" {
-			key = strings.ToLower(absPath)
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-
-		seen[key] = struct{}{}
+		absPath, _ := tryNormalizeAbsolutePath(path)
 		out = append(out, absPath)
 	}
 
-	return out, nil
+	return out
 }
 
-func normalizeAbsolutePath(path string) (string, error) {
-	clean := filepath.Clean(path)
-	absPath, err := filepath.Abs(clean)
+func tryNormalizeAbsolutePath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return "", fmt.Errorf("gappdirs: normalize path %q: %w", path, err)
+		return path, fmt.Errorf("gappdirs: normalize path %q: %w", path, err)
 	}
 	return absPath, nil
 }

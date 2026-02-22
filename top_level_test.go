@@ -3,7 +3,6 @@ package gappdirs
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,22 +25,19 @@ func TestTopLevelScopedDirsAndDirParity(t *testing.T) {
 	appName := "demo_top_level_parity"
 
 	for _, scope := range testScopes {
-		r, err := newResolverForScope(scope, appName)
-		if err != nil {
-			t.Fatalf("new resolver for scope %s: %v", scope, err)
-		}
+		r := newResolverForScope(scope, appName)
 
 		for _, cat := range testCategories {
 			t.Run(fmt.Sprintf("dirs_%s_%s", scope, cat), func(t *testing.T) {
-				topDirs, topErr := callTopDirs(scope, cat, appName)
-				resolverDirs, resolverErr := callResolverDirs(r, cat)
-				assertParity(t, topDirs, topErr, resolverDirs, resolverErr)
+				topDirs := callTopDirs(scope, cat, appName)
+				resolverDirs := callResolverDirs(r, cat)
+				assertValueParity(t, topDirs, resolverDirs)
 			})
 
 			t.Run(fmt.Sprintf("dir_%s_%s", scope, cat), func(t *testing.T) {
-				topDir, topErr := callTopDir(scope, cat, appName)
-				resolverDir, resolverErr := callResolverDir(r, cat)
-				assertParity(t, topDir, topErr, resolverDir, resolverErr)
+				topDir := callTopDir(scope, cat, appName)
+				resolverDir := callResolverDir(r, cat)
+				assertValueParity(t, topDir, resolverDir)
 			})
 		}
 	}
@@ -52,10 +48,7 @@ func TestTopLevelScopedEnsureParity(t *testing.T) {
 	appName := "demo_top_level_ensure"
 
 	for _, scope := range testScopes {
-		r, err := newResolverForScope(scope, appName)
-		if err != nil {
-			t.Fatalf("new resolver for scope %s: %v", scope, err)
-		}
+		r := newResolverForScope(scope, appName)
 
 		for _, cat := range testCategories {
 			t.Run(fmt.Sprintf("ensure_%s_%s", scope, cat), func(t *testing.T) {
@@ -67,9 +60,9 @@ func TestTopLevelScopedEnsureParity(t *testing.T) {
 				}
 			})
 
-			t.Run(fmt.Sprintf("ensure_with_perm_%s_%s", scope, cat), func(t *testing.T) {
-				topPath, topErr := callTopEnsureWithPerm(scope, cat, appName, 0o755)
-				resolverPath, resolverErr := callResolverEnsureWithPerm(r, cat, 0o755)
+			t.Run(fmt.Sprintf("ensure_with_options_%s_%s", scope, cat), func(t *testing.T) {
+				topPath, topErr := callTopEnsureWithOpts(scope, cat, appName, WithEnsureDirPerm(0o755))
+				resolverPath, resolverErr := callResolverEnsureWithOpts(r, cat, WithEnsureDirPerm(0o755))
 				assertParity(t, topPath, topErr, resolverPath, resolverErr)
 				if topErr == nil {
 					assertDirExists(t, topPath)
@@ -84,34 +77,29 @@ func TestTopLevelScopedFindAndFileParity(t *testing.T) {
 	appName := "demo_top_level_search"
 
 	for _, scope := range testScopes {
-		r, err := newResolverForScope(scope, appName)
-		if err != nil {
-			t.Fatalf("new resolver for scope %s: %v", scope, err)
-		}
+		r := newResolverForScope(scope, appName)
 
 		for _, cat := range testCategories {
 			filename := fmt.Sprintf("file_%s_%s.txt", scope, cat)
-			dirs, err := callResolverDirs(r, cat)
-			if err != nil {
-				t.Fatalf("resolve dirs for %s/%s: %v", scope, cat, err)
-			}
+			dirs := callResolverDirs(r, cat)
 			seededDir, seeded := seedFileInFirstWritableDir(dirs, filename)
 
 			t.Run(fmt.Sprintf("find_%s_%s", scope, cat), func(t *testing.T) {
-				topDirs, topErr := callTopFindDirs(scope, cat, appName, filename)
-				resolverDirs, resolverErr := callResolverFindDirs(r, cat, filename)
-				assertParity(t, topDirs, topErr, resolverDirs, resolverErr)
+				topFiles, topErr := callTopFindFiles(scope, cat, appName, filename)
+				resolverFiles, resolverErr := callResolverFindFiles(r, cat, filename)
+				assertParity(t, topFiles, topErr, resolverFiles, resolverErr)
 
 				if seeded {
-					if len(topDirs) == 0 || topDirs[0] != seededDir {
-						t.Fatalf("expected first matching dir %q, got %#v", seededDir, topDirs)
+					wantFirst := filepath.Join(seededDir, filename)
+					if len(topFiles) == 0 || topFiles[0] != wantFirst {
+						t.Fatalf("expected first matching file %q, got %#v", wantFirst, topFiles)
 					}
 				}
 			})
 
 			t.Run(fmt.Sprintf("file_%s_%s", scope, cat), func(t *testing.T) {
-				topFile, topErr := callTopFile(scope, cat, appName, filename)
-				resolverFile, resolverErr := callResolverFile(r, cat, filename)
+				topFile, topErr := callTopFindFile(scope, cat, appName, filename)
+				resolverFile, resolverErr := callResolverFindFile(r, cat, filename)
 				assertParity(t, topFile, topErr, resolverFile, resolverErr)
 
 				if seeded {
@@ -133,30 +121,31 @@ func TestTopLevelErrorParity(t *testing.T) {
 	setupTopLevelTestEnv(t)
 
 	for _, scope := range testScopes {
-		t.Run(fmt.Sprintf("invalid_app_%s", scope), func(t *testing.T) {
-			_, topErr := callTopDir(scope, categoryData, "")
-			_, resolverErr := newResolverForScope(scope, "")
-			assertErrorParity(t, topErr, resolverErr)
+		t.Run(fmt.Sprintf("defaulted_app_%s", scope), func(t *testing.T) {
+			r := newResolverForScope(scope, "")
+			topDir := callTopDir(scope, categoryData, "")
+			resolverDir := callResolverDir(r, categoryData)
+			assertValueParity(t, topDir, resolverDir)
+			if !strings.Contains(topDir, "unnamed_app") {
+				t.Fatalf("expected defaulted app name in path, got %q", topDir)
+			}
 		})
 	}
 
 	appName := "demo_top_level_errors"
 	for _, scope := range testScopes {
-		r, err := newResolverForScope(scope, appName)
-		if err != nil {
-			t.Fatalf("new resolver for scope %s: %v", scope, err)
-		}
+		r := newResolverForScope(scope, appName)
 
 		t.Run(fmt.Sprintf("invalid_filename_%s", scope), func(t *testing.T) {
-			_, topErr := callTopFindDirs(scope, categoryData, appName, "a/b")
-			_, resolverErr := callResolverFindDirs(r, categoryData, "a/b")
+			_, topErr := callTopFindFiles(scope, categoryData, appName, "")
+			_, resolverErr := callResolverFindFiles(r, categoryData, "")
 			assertErrorParity(t, topErr, resolverErr)
 		})
 
 		t.Run(fmt.Sprintf("missing_file_%s", scope), func(t *testing.T) {
 			filename := fmt.Sprintf("missing_%s.txt", scope)
-			_, topErr := callTopFile(scope, categoryData, appName, filename)
-			_, resolverErr := callResolverFile(r, categoryData, filename)
+			_, topErr := callTopFindFile(scope, categoryData, appName, filename)
+			_, resolverErr := callResolverFindFile(r, categoryData, filename)
 			assertErrorParity(t, topErr, resolverErr)
 			if !errors.Is(topErr, ErrNotFound) {
 				t.Fatalf("expected ErrNotFound, got %v", topErr)
@@ -209,7 +198,7 @@ func setupTopLevelTestEnv(t *testing.T) {
 	}
 }
 
-func newResolverForScope(scope Scope, appName string) (Resolver, error) {
+func newResolverForScope(scope Scope, appName string) Resolver {
 	switch scope {
 	case ScopeLocal:
 		return NewLocalResolver(appName)
@@ -218,7 +207,7 @@ func newResolverForScope(scope Scope, appName string) (Resolver, error) {
 	case ScopeSystem:
 		return NewSystemResolver(appName)
 	default:
-		return nil, fmt.Errorf("unsupported scope %s", scope)
+		return nil
 	}
 }
 
@@ -226,6 +215,13 @@ func assertParity[T any](t *testing.T, topValue T, topErr error, resolverValue T
 	t.Helper()
 	assertErrorParity(t, topErr, resolverErr)
 	if topErr == nil && !reflect.DeepEqual(topValue, resolverValue) {
+		t.Fatalf("result mismatch:\nresolver: %#v\ntop:      %#v", resolverValue, topValue)
+	}
+}
+
+func assertValueParity[T any](t *testing.T, topValue T, resolverValue T) {
+	t.Helper()
+	if !reflect.DeepEqual(topValue, resolverValue) {
 		t.Fatalf("result mismatch:\nresolver: %#v\ntop:      %#v", resolverValue, topValue)
 	}
 }
@@ -270,7 +266,7 @@ func seedFileInFirstWritableDir(dirs []string, filename string) (string, bool) {
 	return "", false
 }
 
-func callTopDirs(scope Scope, cat category, appName string) ([]string, error) {
+func callTopDirs(scope Scope, cat category, appName string) []string {
 	switch scope {
 	case ScopeLocal:
 		switch cat {
@@ -306,10 +302,10 @@ func callTopDirs(scope Scope, cat category, appName string) ([]string, error) {
 			return SystemCacheDirs(appName)
 		}
 	}
-	return nil, fmt.Errorf("unsupported scope/category: %s/%s", scope, cat)
+	return nil
 }
 
-func callTopDir(scope Scope, cat category, appName string) (string, error) {
+func callTopDir(scope Scope, cat category, appName string) string {
 	switch scope {
 	case ScopeLocal:
 		switch cat {
@@ -345,7 +341,7 @@ func callTopDir(scope Scope, cat category, appName string) (string, error) {
 			return SystemCacheDir(appName)
 		}
 	}
-	return "", fmt.Errorf("unsupported scope/category: %s/%s", scope, cat)
+	return ""
 }
 
 func callTopEnsure(scope Scope, cat category, appName string) (string, error) {
@@ -387,124 +383,124 @@ func callTopEnsure(scope Scope, cat category, appName string) (string, error) {
 	return "", fmt.Errorf("unsupported scope/category: %s/%s", scope, cat)
 }
 
-func callTopEnsureWithPerm(scope Scope, cat category, appName string, perm fs.FileMode) (string, error) {
+func callTopEnsureWithOpts(scope Scope, cat category, appName string, opts ...EnsureOption) (string, error) {
 	switch scope {
 	case ScopeLocal:
 		switch cat {
 		case categoryData:
-			return EnsureLocalDataDirWithPerm(appName, perm)
+			return EnsureLocalDataDir(appName, opts...)
 		case categoryConfig:
-			return EnsureLocalConfigDirWithPerm(appName, perm)
+			return EnsureLocalConfigDir(appName, opts...)
 		case categoryLog:
-			return EnsureLocalLogDirWithPerm(appName, perm)
+			return EnsureLocalLogDir(appName, opts...)
 		case categoryCache:
-			return EnsureLocalCacheDirWithPerm(appName, perm)
+			return EnsureLocalCacheDir(appName, opts...)
 		}
 	case ScopeUser:
 		switch cat {
 		case categoryData:
-			return EnsureUserDataDirWithPerm(appName, perm)
+			return EnsureUserDataDir(appName, opts...)
 		case categoryConfig:
-			return EnsureUserConfigDirWithPerm(appName, perm)
+			return EnsureUserConfigDir(appName, opts...)
 		case categoryLog:
-			return EnsureUserLogDirWithPerm(appName, perm)
+			return EnsureUserLogDir(appName, opts...)
 		case categoryCache:
-			return EnsureUserCacheDirWithPerm(appName, perm)
+			return EnsureUserCacheDir(appName, opts...)
 		}
 	case ScopeSystem:
 		switch cat {
 		case categoryData:
-			return EnsureSystemDataDirWithPerm(appName, perm)
+			return EnsureSystemDataDir(appName, opts...)
 		case categoryConfig:
-			return EnsureSystemConfigDirWithPerm(appName, perm)
+			return EnsureSystemConfigDir(appName, opts...)
 		case categoryLog:
-			return EnsureSystemLogDirWithPerm(appName, perm)
+			return EnsureSystemLogDir(appName, opts...)
 		case categoryCache:
-			return EnsureSystemCacheDirWithPerm(appName, perm)
+			return EnsureSystemCacheDir(appName, opts...)
 		}
 	}
 	return "", fmt.Errorf("unsupported scope/category: %s/%s", scope, cat)
 }
 
-func callTopFindDirs(scope Scope, cat category, appName string, filename string) ([]string, error) {
+func callTopFindFiles(scope Scope, cat category, appName string, filename string) ([]string, error) {
 	switch scope {
 	case ScopeLocal:
 		switch cat {
 		case categoryData:
-			return FindLocalDataFileDirs(appName, filename)
+			return FindLocalDataFiles(appName, filename)
 		case categoryConfig:
-			return FindLocalConfigFileDirs(appName, filename)
+			return FindLocalConfigFiles(appName, filename)
 		case categoryLog:
-			return FindLocalLogFileDirs(appName, filename)
+			return FindLocalLogFiles(appName, filename)
 		case categoryCache:
-			return FindLocalCacheFileDirs(appName, filename)
+			return FindLocalCacheFiles(appName, filename)
 		}
 	case ScopeUser:
 		switch cat {
 		case categoryData:
-			return FindUserDataFileDirs(appName, filename)
+			return FindUserDataFiles(appName, filename)
 		case categoryConfig:
-			return FindUserConfigFileDirs(appName, filename)
+			return FindUserConfigFiles(appName, filename)
 		case categoryLog:
-			return FindUserLogFileDirs(appName, filename)
+			return FindUserLogFiles(appName, filename)
 		case categoryCache:
-			return FindUserCacheFileDirs(appName, filename)
+			return FindUserCacheFiles(appName, filename)
 		}
 	case ScopeSystem:
 		switch cat {
 		case categoryData:
-			return FindSystemDataFileDirs(appName, filename)
+			return FindSystemDataFiles(appName, filename)
 		case categoryConfig:
-			return FindSystemConfigFileDirs(appName, filename)
+			return FindSystemConfigFiles(appName, filename)
 		case categoryLog:
-			return FindSystemLogFileDirs(appName, filename)
+			return FindSystemLogFiles(appName, filename)
 		case categoryCache:
-			return FindSystemCacheFileDirs(appName, filename)
+			return FindSystemCacheFiles(appName, filename)
 		}
 	}
 	return nil, fmt.Errorf("unsupported scope/category: %s/%s", scope, cat)
 }
 
-func callTopFile(scope Scope, cat category, appName string, filename string) (string, error) {
+func callTopFindFile(scope Scope, cat category, appName string, filename string) (string, error) {
 	switch scope {
 	case ScopeLocal:
 		switch cat {
 		case categoryData:
-			return LocalDataFile(appName, filename)
+			return FindLocalDataFile(appName, filename)
 		case categoryConfig:
-			return LocalConfigFile(appName, filename)
+			return FindLocalConfigFile(appName, filename)
 		case categoryLog:
-			return LocalLogFile(appName, filename)
+			return FindLocalLogFile(appName, filename)
 		case categoryCache:
-			return LocalCacheFile(appName, filename)
+			return FindLocalCacheFile(appName, filename)
 		}
 	case ScopeUser:
 		switch cat {
 		case categoryData:
-			return UserDataFile(appName, filename)
+			return FindUserDataFile(appName, filename)
 		case categoryConfig:
-			return UserConfigFile(appName, filename)
+			return FindUserConfigFile(appName, filename)
 		case categoryLog:
-			return UserLogFile(appName, filename)
+			return FindUserLogFile(appName, filename)
 		case categoryCache:
-			return UserCacheFile(appName, filename)
+			return FindUserCacheFile(appName, filename)
 		}
 	case ScopeSystem:
 		switch cat {
 		case categoryData:
-			return SystemDataFile(appName, filename)
+			return FindSystemDataFile(appName, filename)
 		case categoryConfig:
-			return SystemConfigFile(appName, filename)
+			return FindSystemConfigFile(appName, filename)
 		case categoryLog:
-			return SystemLogFile(appName, filename)
+			return FindSystemLogFile(appName, filename)
 		case categoryCache:
-			return SystemCacheFile(appName, filename)
+			return FindSystemCacheFile(appName, filename)
 		}
 	}
 	return "", fmt.Errorf("unsupported scope/category: %s/%s", scope, cat)
 }
 
-func callResolverDirs(r Resolver, cat category) ([]string, error) {
+func callResolverDirs(r Resolver, cat category) []string {
 	switch cat {
 	case categoryData:
 		return r.DataDirs()
@@ -515,11 +511,11 @@ func callResolverDirs(r Resolver, cat category) ([]string, error) {
 	case categoryCache:
 		return r.CacheDirs()
 	default:
-		return nil, fmt.Errorf("unsupported category %s", cat)
+		return nil
 	}
 }
 
-func callResolverDir(r Resolver, cat category) (string, error) {
+func callResolverDir(r Resolver, cat category) string {
 	switch cat {
 	case categoryData:
 		return r.DataDir()
@@ -530,7 +526,7 @@ func callResolverDir(r Resolver, cat category) (string, error) {
 	case categoryCache:
 		return r.CacheDir()
 	default:
-		return "", fmt.Errorf("unsupported category %s", cat)
+		return ""
 	}
 }
 
@@ -549,46 +545,46 @@ func callResolverEnsure(r Resolver, cat category) (string, error) {
 	}
 }
 
-func callResolverEnsureWithPerm(r Resolver, cat category, perm fs.FileMode) (string, error) {
+func callResolverEnsureWithOpts(r Resolver, cat category, opts ...EnsureOption) (string, error) {
 	switch cat {
 	case categoryData:
-		return r.EnsureDataDirWithPerm(perm)
+		return r.EnsureDataDir(opts...)
 	case categoryConfig:
-		return r.EnsureConfigDirWithPerm(perm)
+		return r.EnsureConfigDir(opts...)
 	case categoryLog:
-		return r.EnsureLogDirWithPerm(perm)
+		return r.EnsureLogDir(opts...)
 	case categoryCache:
-		return r.EnsureCacheDirWithPerm(perm)
+		return r.EnsureCacheDir(opts...)
 	default:
 		return "", fmt.Errorf("unsupported category %s", cat)
 	}
 }
 
-func callResolverFindDirs(r Resolver, cat category, filename string) ([]string, error) {
+func callResolverFindFiles(r Resolver, cat category, filename string) ([]string, error) {
 	switch cat {
 	case categoryData:
-		return r.FindDataFileDirs(filename)
+		return r.FindDataFiles(filename)
 	case categoryConfig:
-		return r.FindConfigFileDirs(filename)
+		return r.FindConfigFiles(filename)
 	case categoryLog:
-		return r.FindLogFileDirs(filename)
+		return r.FindLogFiles(filename)
 	case categoryCache:
-		return r.FindCacheFileDirs(filename)
+		return r.FindCacheFiles(filename)
 	default:
 		return nil, fmt.Errorf("unsupported category %s", cat)
 	}
 }
 
-func callResolverFile(r Resolver, cat category, filename string) (string, error) {
+func callResolverFindFile(r Resolver, cat category, filename string) (string, error) {
 	switch cat {
 	case categoryData:
-		return r.DataFile(filename)
+		return r.FindDataFile(filename)
 	case categoryConfig:
-		return r.ConfigFile(filename)
+		return r.FindConfigFile(filename)
 	case categoryLog:
-		return r.LogFile(filename)
+		return r.FindLogFile(filename)
 	case categoryCache:
-		return r.CacheFile(filename)
+		return r.FindCacheFile(filename)
 	default:
 		return "", fmt.Errorf("unsupported category %s", cat)
 	}

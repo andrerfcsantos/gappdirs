@@ -47,42 +47,27 @@ import (
 )
 
 func main() {
-	r, err := appdirs.NewResolver("myapp", appdirs.WithScope(appdirs.ScopeUser))
-	if err != nil {
-		log.Fatal(err)
-	}
+	r := appdirs.NewResolver("myapp", appdirs.WithScope(appdirs.ScopeUser))
 
-	dataDirs, err := r.DataDirs()
-	if err != nil {
-		log.Fatal(err)
-	}
+	dataDirs := r.DataDirs()
 	fmt.Println("data dirs:", dataDirs)
 
-	configDirs, err := r.ConfigDirs()
-	if err != nil {
-		log.Fatal(err)
-	}
+	configDirs := r.ConfigDirs()
 	fmt.Println("config dirs:", configDirs)
 
-	logDirs, err := r.LogDirs()
-	if err != nil {
-		log.Fatal(err)
-	}
+	logDirs := r.LogDirs()
 	fmt.Println("log dirs:", logDirs)
 
-	cacheDirs, err := r.CacheDirs()
-	if err != nil {
-		log.Fatal(err)
-	}
+	cacheDirs := r.CacheDirs()
 	fmt.Println("cache dirs:", cacheDirs)
 
-	cacheDir, err := r.EnsureCacheDir()
+	cacheDir, err := r.EnsureCacheDir(appdirs.WithEnsureDirPerm(0o700))
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("ensured cache dir:", cacheDir)
 
-	configFile, err := r.ConfigFile("settings.yaml")
+	configFile, err := r.FindConfigFile("settings.yaml")
 	if errors.Is(err, appdirs.ErrNotFound) {
 		fmt.Println("settings.yaml not found in config search path")
 	} else if err != nil {
@@ -95,12 +80,29 @@ func main() {
 
 ## Constructors
 
-- `NewResolver(appName, opts...)` returns a `Resolver` and uses normal option-driven scope behavior.
-- `NewUserResolver(appName, opts...)` returns a `Resolver` and always uses `ScopeUser`.
-- `NewSystemResolver(appName, opts...)` returns a `Resolver` and always uses `ScopeSystem`.
-- `NewLocalResolver(appName, opts...)` returns a `Resolver` and always uses `ScopeLocal`.
+- `NewResolver(appName, opts...) Resolver` uses normal option-driven scope behavior.
+- `NewUserResolver(appName, opts...) Resolver` always uses `ScopeUser`.
+- `NewSystemResolver(appName, opts...) Resolver` always uses `ScopeSystem`.
+- `NewLocalResolver(appName, opts...) Resolver` always uses `ScopeLocal`.
 
 For fixed-scope constructors, scope is enforced by the constructor even if `WithScope(...)` is provided in options.
+
+## Option Behavior
+
+Options never return errors and invalid values fall back to defaults.
+
+- `WithScope(scope)` uses `ScopeUser` when `scope` is invalid.
+- `WithWorkingDir(dir)` trims spaces and ignores the option when `dir` is empty.
+- `WithDefaultDirPerm(perm)` falls back to `0o755` when `perm` is zero or contains non-permission bits.
+- `nil` options are ignored.
+
+For local scope, working directory resolution is deferred to local-scope operations. This keeps constructor paths non-failing.
+
+Ensure call options:
+
+- `WithEnsureDirPerm(perm)` sets the permission for a single `Ensure*Dir` call.
+- Invalid values (`0` or values containing mode-type bits) are ignored and fallback to resolver default permission.
+- `nil` ensure options are ignored.
 
 ## Top-Level Scoped Helpers
 
@@ -110,27 +112,27 @@ Each helper takes only `appName` and uses the default resolver behavior.
 - Directory lists: `LocalDataDirs(appName)`, `UserConfigDirs(appName)`, `SystemCacheDirs(appName)`
 - Most relevant directory: `LocalDataDir(appName)`, `UserConfigDir(appName)`, `SystemCacheDir(appName)`
 - Ensure directory: `EnsureLocalDataDir(appName)`, `EnsureUserConfigDir(appName)`, `EnsureSystemCacheDir(appName)`
-- Ensure directory with permissions: `EnsureLocalDataDirWithPerm(appName, perm)`
-- Find matching file directories: `FindLocalDataFileDirs(appName, filename)`, `FindUserConfigFileDirs(appName, filename)`, `FindSystemCacheFileDirs(appName, filename)`
-- Most relevant file: `LocalDataFile(appName, filename)`, `UserConfigFile(appName, filename)`, `SystemCacheFile(appName, filename)`
+- Ensure directory with options: `EnsureLocalDataDir(appName, WithEnsureDirPerm(0o700))`
+- Find matching files: `FindLocalDataFiles(appName, filename)`, `FindUserConfigFiles(appName, filename)`, `FindSystemCacheFiles(appName, filename)`
+- Most relevant file: `FindLocalDataFile(appName, filename)`, `FindUserConfigFile(appName, filename)`, `FindSystemCacheFile(appName, filename)`
+
+`Dir`/`Dirs` helpers do not return errors. `Ensure*`, `Find*Files`, and `Find*File` helpers still return errors.
 
 Naming pattern:
 - Non-`Ensure`/`Find`: `Scope + Category + ...` (for example, `LocalDataDir`)
 - `Ensure` methods: `Ensure + Scope + Category + ...` (for example, `EnsureLocalDataDir`)
-- `Find` methods: `Find + Scope + Category + ...` (for example, `FindLocalDataFileDirs`)
+- `Find` methods: `Find + Scope + Category + ...` (for example, `FindLocalDataFiles`)
 
 ## App Name Sanitization
 
 App names are sanitized during constructor creation:
 
 - Trim leading/trailing whitespace.
-- Convert to lowercase.
 - Convert spaces/whitespace to `_`.
 - Convert `/`, `\\`, `:`, `*`, `?`, `"`, `<`, `>`, and `|` to `_`.
-- Collapse repeated underscores and trim leading/trailing underscores.
-- Special cases: `"."` becomes `"_"`, and `".."` becomes `"__"`.
+- Keep all other characters unchanged (including letter casing and repeated underscores).
 
-If the sanitized name is empty, constructor creation returns `gappdirs: app name is required`.
+If the sanitized name is empty, it defaults to `unnamed_app`.
 
 ## Directory Resolution Matrix
 

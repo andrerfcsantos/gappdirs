@@ -1,63 +1,62 @@
 package gappdirs
 
 import (
+	"io/fs"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"testing"
 )
 
-func TestNewResolverValidatesAndAppliesOptions(t *testing.T) {
-	t.Run("missing app name", func(t *testing.T) {
-		_, err := NewResolver("")
-		if err == nil {
-			t.Fatal("expected error for empty app name")
+func TestNewResolverAppliesOptions(t *testing.T) {
+	t.Run("missing app name defaults", func(t *testing.T) {
+		r := NewResolver("")
+		impl, ok := r.(*resolver)
+		if !ok {
+			t.Fatalf("unexpected resolver implementation type: %T", r)
+		}
+		if impl.ctx.appName != "unnamed_app" {
+			t.Fatalf("default app name mismatch: want %q, got %q", "unnamed_app", impl.ctx.appName)
 		}
 	})
 
 	t.Run("sanitizes app name", func(t *testing.T) {
 		wd := t.TempDir()
-		r, err := newResolver(
+		r := newResolver(
 			"A/B Demo",
 			[]Option{WithScope(ScopeLocal), WithWorkingDir(wd)},
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "u")}, nil },
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "s")}, nil },
 		)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if r.ctx.appName != "a_b_demo" {
-			t.Fatalf("sanitized app name mismatch: want %q, got %q", "a_b_demo", r.ctx.appName)
+		if r.ctx.appName != "A_B_Demo" {
+			t.Fatalf("sanitized app name mismatch: want %q, got %q", "A_B_Demo", r.ctx.appName)
 		}
 
-		got, err := r.DataDir()
-		if err != nil {
-			t.Fatalf("unexpected error from DataDir: %v", err)
-		}
-		want := filepath.Join(wd, ".a_b_demo", "data")
+		got := r.DataDir()
+		want := filepath.Join(wd, ".A_B_Demo", "data")
 		if got != want {
 			t.Fatalf("local data dir mismatch: want %q, got %q", want, got)
 		}
 	})
 
-	t.Run("nil option", func(t *testing.T) {
-		_, err := NewResolver("demo", nil)
-		if err == nil {
-			t.Fatal("expected error for nil option")
+	t.Run("nil option is ignored", func(t *testing.T) {
+		r := NewResolver("demo", nil)
+		impl, ok := r.(*resolver)
+		if !ok {
+			t.Fatalf("unexpected resolver implementation type: %T", r)
+		}
+		if impl.ctx.scope != ScopeUser {
+			t.Fatalf("default scope mismatch: want %s, got %s", ScopeUser, impl.ctx.scope)
 		}
 	})
 
 	t.Run("default scope and permissions", func(t *testing.T) {
 		wd := t.TempDir()
-		r, err := newResolver(
+		r := newResolver(
 			"demo",
 			[]Option{WithWorkingDir(wd)},
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "u")}, nil },
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "s")}, nil },
 		)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
 		if r.ctx.scope != ScopeUser {
 			t.Fatalf("default scope mismatch: want %s, got %s", ScopeUser, r.ctx.scope)
 		}
@@ -68,7 +67,7 @@ func TestNewResolverValidatesAndAppliesOptions(t *testing.T) {
 
 	t.Run("duplicate options use last value", func(t *testing.T) {
 		wd := t.TempDir()
-		r, err := newResolver(
+		r := newResolver(
 			"demo",
 			[]Option{
 				WithWorkingDir(wd),
@@ -80,9 +79,6 @@ func TestNewResolverValidatesAndAppliesOptions(t *testing.T) {
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "u")}, nil },
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "s")}, nil },
 		)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
 		if r.ctx.scope != ScopeLocal {
 			t.Fatalf("scope mismatch: want %s, got %s", ScopeLocal, r.ctx.scope)
 		}
@@ -93,7 +89,7 @@ func TestNewResolverValidatesAndAppliesOptions(t *testing.T) {
 }
 
 func TestScopedConstructorsForceScope(t *testing.T) {
-	type scopedCtor func(string, ...Option) (Resolver, error)
+	type scopedCtor func(string, ...Option) Resolver
 
 	for _, tc := range []struct {
 		name        string
@@ -106,10 +102,7 @@ func TestScopedConstructorsForceScope(t *testing.T) {
 		{name: "local", ctor: NewLocalResolver, conflicting: ScopeSystem, wantScope: ScopeLocal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := tc.ctor("demo", WithScope(tc.conflicting), WithWorkingDir(t.TempDir()))
-			if err != nil {
-				t.Fatalf("constructor error: %v", err)
-			}
+			r := tc.ctor("demo", WithScope(tc.conflicting), WithWorkingDir(t.TempDir()))
 			impl, ok := r.(*resolver)
 			if !ok {
 				t.Fatalf("unexpected resolver implementation type: %T", r)
@@ -122,10 +115,7 @@ func TestScopedConstructorsForceScope(t *testing.T) {
 }
 
 func TestConstructorsReturnResolverInterface(t *testing.T) {
-	r, err := NewResolver("demo", WithWorkingDir(t.TempDir()))
-	if err != nil {
-		t.Fatalf("constructor error: %v", err)
-	}
+	r := NewResolver("demo", WithWorkingDir(t.TempDir()))
 	if _, ok := r.(*resolver); !ok {
 		t.Fatalf("expected private resolver implementation, got %T", r)
 	}
@@ -133,30 +123,21 @@ func TestConstructorsReturnResolverInterface(t *testing.T) {
 
 func TestSanitizeAppName(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		input   string
-		want    string
-		wantErr bool
+		name  string
+		input string
+		want  string
 	}{
-		{name: "mixed case and spaces", input: "My App", want: "my_app"},
-		{name: "single dot", input: ".", want: "_"},
-		{name: "double dots", input: "..", want: "__"},
+		{name: "mixed case and spaces", input: "My App", want: "My_App"},
+		{name: "single dot", input: ".", want: "."},
+		{name: "double dots", input: "..", want: ".."},
 		{name: "forward slash", input: "my/app", want: "my_app"},
 		{name: "backslash", input: `my\app`, want: "my_app"},
-		{name: "collapse underscores", input: "My   App", want: "my_app"},
-		{name: "empty", input: "   ", wantErr: true},
+		{name: "preserves repeated underscores", input: "My   App", want: "My___App"},
+		{name: "empty defaults", input: "   ", want: "unnamed_app"},
+		{name: "trim outer spaces", input: "  Demo App  ", want: "Demo_App"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := sanitizeAppName(tc.input)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error for %q", tc.input)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			got := sanitizeAppName(tc.input)
 			if got != tc.want {
 				t.Fatalf("sanitized name mismatch: want %q, got %q", tc.want, got)
 			}
@@ -164,33 +145,36 @@ func TestSanitizeAppName(t *testing.T) {
 	}
 }
 
-func TestOptionValidation(t *testing.T) {
+func TestOptionFallbacks(t *testing.T) {
 	wd := t.TempDir()
 	userFn := func(string, category) ([]string, error) { return []string{filepath.Join(wd, "u")}, nil }
 	systemFn := func(string, category) ([]string, error) { return []string{filepath.Join(wd, "s")}, nil }
 
-	for _, tc := range []struct {
-		name string
-		opts []Option
-	}{
-		{name: "invalid scope", opts: []Option{WithScope(Scope(-1)), WithWorkingDir(wd)}},
-		{name: "empty working dir", opts: []Option{WithWorkingDir("  ")}},
-		{name: "zero default permission", opts: []Option{WithDefaultDirPerm(0), WithWorkingDir(wd)}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := newResolver("demo", tc.opts, userFn, systemFn)
-			if err == nil {
-				t.Fatal("expected option validation error")
-			}
-		})
-	}
-}
+	t.Run("invalid scope defaults to user", func(t *testing.T) {
+		r := newResolver("demo", []Option{WithScope(Scope(-1)), WithWorkingDir(wd)}, userFn, systemFn)
+		if r.ctx.scope != ScopeUser {
+			t.Fatalf("scope fallback mismatch: want %s, got %s", ScopeUser, r.ctx.scope)
+		}
+	})
 
-func TestDirsNilResolver(t *testing.T) {
-	var r *resolver
-	if _, err := r.DataDirs(); err == nil {
-		t.Fatal("expected error for nil resolver")
-	}
+	t.Run("empty working dir option is ignored", func(t *testing.T) {
+		r := newResolver("demo", []Option{WithWorkingDir("  ")}, userFn, systemFn)
+		if r.ctx.workingDir != "" {
+			t.Fatalf("working dir should remain empty when option is ignored, got %q", r.ctx.workingDir)
+		}
+	})
+
+	t.Run("invalid permission falls back to default", func(t *testing.T) {
+		r := newResolver("demo", []Option{WithDefaultDirPerm(0), WithWorkingDir(wd)}, userFn, systemFn)
+		if r.ctx.defaultDirPerm != defaultDirPerm {
+			t.Fatalf("permission fallback mismatch: want %o, got %o", defaultDirPerm, r.ctx.defaultDirPerm)
+		}
+
+		r = newResolver("demo", []Option{WithDefaultDirPerm(fs.ModeDir | 0o755), WithWorkingDir(wd)}, userFn, systemFn)
+		if r.ctx.defaultDirPerm != defaultDirPerm {
+			t.Fatalf("permission fallback mismatch for mode bits: want %o, got %o", defaultDirPerm, r.ctx.defaultDirPerm)
+		}
+	})
 }
 
 func TestDirsScopeOrdering(t *testing.T) {
@@ -210,10 +194,7 @@ func TestDirsScopeOrdering(t *testing.T) {
 	}
 
 	rLocal := mustResolver(t, ScopeLocal, wd, user, system)
-	gotLocal, err := rLocal.DataDirs()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	gotLocal := rLocal.DataDirs()
 	wantLocal := []string{
 		filepath.Join(wd, ".demo", "data"),
 		userData,
@@ -224,20 +205,14 @@ func TestDirsScopeOrdering(t *testing.T) {
 	}
 
 	rUser := mustResolver(t, ScopeUser, wd, user, system)
-	gotUser, err := rUser.DataDirs()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	gotUser := rUser.DataDirs()
 	wantUser := []string{userData, systemData}
 	if !reflect.DeepEqual(gotUser, wantUser) {
 		t.Fatalf("user dirs mismatch:\nwant: %#v\ngot:  %#v", wantUser, gotUser)
 	}
 
 	rSystem := mustResolver(t, ScopeSystem, wd, user, system)
-	gotSystem, err := rSystem.ConfigDirs()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	gotSystem := rSystem.ConfigDirs()
 	wantSystem := []string{systemConfig}
 	if !reflect.DeepEqual(gotSystem, wantSystem) {
 		t.Fatalf("system dirs mismatch:\nwant: %#v\ngot:  %#v", wantSystem, gotSystem)
@@ -254,55 +229,14 @@ func TestDirMethods(t *testing.T) {
 		map[category][]string{categoryData: {systemData}},
 	)
 
-	got, err := r.DataDir()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	got := r.DataDir()
 	if got != userData {
 		t.Fatalf("most relevant data dir mismatch: want %q, got %q", userData, got)
 	}
 
-	gotDataDirs, err := r.DataDirs()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	gotDataDirs := r.DataDirs()
 	if !reflect.DeepEqual(gotDataDirs, []string{userData, systemData}) {
 		t.Fatalf("unexpected data dirs: %#v", gotDataDirs)
-	}
-}
-
-func TestDirsDedupeAndNormalization(t *testing.T) {
-	wd := t.TempDir()
-	dupBase := filepath.Join(wd, "shared")
-
-	userData := []string{dupBase, filepath.Join(dupBase, ".")}
-	systemData := []string{dupBase}
-	if runtime.GOOS == "windows" {
-		systemData = []string{filepath.Join(wd, "SHARED")}
-	}
-
-	r := mustResolver(t, ScopeUser, wd,
-		map[category][]string{categoryData: userData},
-		map[category][]string{categoryData: systemData},
-	)
-
-	got, err := r.DataDirs()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if runtime.GOOS == "windows" {
-		if len(got) != 1 {
-			t.Fatalf("expected 1 deduped path on windows, got %#v", got)
-		}
-		if filepath.Clean(got[0]) != filepath.Clean(dupBase) {
-			t.Fatalf("deduped path mismatch: want %q, got %q", dupBase, got[0])
-		}
-		return
-	}
-
-	if !reflect.DeepEqual(got, []string{dupBase}) {
-		t.Fatalf("dedupe mismatch:\nwant: %#v\ngot:  %#v", []string{dupBase}, got)
 	}
 }
 
@@ -312,7 +246,7 @@ func mustResolver(t *testing.T, scope Scope, workingDir string, user map[categor
 	opts := []Option{WithScope(scope), WithWorkingDir(workingDir)}
 	opts = append(opts, extraOpts...)
 
-	r, err := newResolver(
+	r := newResolver(
 		"demo",
 		opts,
 		func(_ string, cat category) ([]string, error) {
@@ -322,9 +256,6 @@ func mustResolver(t *testing.T, scope Scope, workingDir string, user map[categor
 			return append([]string(nil), system[cat]...), nil
 		},
 	)
-	if err != nil {
-		t.Fatalf("newResolver error: %v", err)
-	}
 
 	return r
 }

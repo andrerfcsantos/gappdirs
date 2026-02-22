@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestFindFileDirsAndFile(t *testing.T) {
+func TestFindFilesAndFindFile(t *testing.T) {
 	wd := t.TempDir()
 	localConfig := filepath.Join(wd, ".demo", "config")
 	userConfig := filepath.Join(wd, "user", "config")
@@ -32,16 +32,19 @@ func TestFindFileDirsAndFile(t *testing.T) {
 		t.Fatalf("write system file: %v", err)
 	}
 
-	gotDirs, err := r.FindConfigFileDirs("settings.yaml")
+	gotFiles, err := r.FindConfigFiles("settings.yaml")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantDirs := []string{localConfig, systemConfig}
-	if !reflect.DeepEqual(gotDirs, wantDirs) {
-		t.Fatalf("matching dirs mismatch:\nwant: %#v\ngot:  %#v", wantDirs, gotDirs)
+	wantFiles := []string{
+		filepath.Join(localConfig, "settings.yaml"),
+		filepath.Join(systemConfig, "settings.yaml"),
+	}
+	if !reflect.DeepEqual(gotFiles, wantFiles) {
+		t.Fatalf("matching files mismatch:\nwant: %#v\ngot:  %#v", wantFiles, gotFiles)
 	}
 
-	gotFile, err := r.ConfigFile("settings.yaml")
+	gotFile, err := r.FindConfigFile("settings.yaml")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,7 +61,7 @@ func TestFileNotFound(t *testing.T) {
 		map[category][]string{categoryData: {filepath.Join(wd, "system", "data")}},
 	)
 
-	_, err := r.DataFile("missing.db")
+	_, err := r.FindDataFile("missing.db")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -71,11 +74,19 @@ func TestFilenameValidation(t *testing.T) {
 		map[category][]string{categoryData: {filepath.Join(wd, "system", "data")}},
 	)
 
-	invalidNames := []string{"", "a/b", "a\\b", "/tmp/x"}
-	for _, filename := range invalidNames {
-		_, err := r.FindDataFileDirs(filename)
-		if err == nil {
-			t.Fatalf("expected error for filename %q", filename)
+	_, err := r.FindDataFiles("")
+	if err == nil {
+		t.Fatal("expected error for empty filename")
+	}
+
+	validNames := []string{
+		"a/b",
+		"a\\b",
+		filepath.Join(wd, "abs", "x.db"),
+	}
+	for _, filename := range validNames {
+		if _, err := r.FindDataFiles(filename); err != nil {
+			t.Fatalf("expected no error for filename %q, got %v", filename, err)
 		}
 	}
 }

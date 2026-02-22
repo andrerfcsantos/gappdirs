@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestEnsureCacheDirWithPerm(t *testing.T) {
+func TestEnsureCacheDirWithOptionPerm(t *testing.T) {
 	wd := t.TempDir()
 	userCache := filepath.Join(wd, "user", "cache")
 	systemCache := filepath.Join(wd, "system", "cache")
@@ -16,7 +16,7 @@ func TestEnsureCacheDirWithPerm(t *testing.T) {
 		map[category][]string{categoryCache: {systemCache}},
 	)
 
-	created, err := r.EnsureCacheDirWithPerm(0o755)
+	created, err := r.EnsureCacheDir(WithEnsureDirPerm(0o755))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
