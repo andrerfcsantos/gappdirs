@@ -86,3 +86,16 @@ func linuxEnvDirListOrDefault(envKey, fallback string) []string {
 	}
 	return splitAbsolutePathList(fallback)
 }
+
+func splitAbsolutePathList(pathList string) []string {
+	rawItems := filepath.SplitList(pathList)
+	out := make([]string, 0, len(rawItems))
+	for _, item := range rawItems {
+		item = strings.TrimSpace(item)
+		if item == "" || !filepath.IsAbs(item) {
+			continue
+		}
+		out = append(out, filepath.Clean(item))
+	}
+	return out
+}

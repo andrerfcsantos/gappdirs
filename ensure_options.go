@@ -2,7 +2,8 @@ package gappdirs
 
 import "io/fs"
 
-// EnsureOption configures per-call behavior for Ensure*Dir helpers.
+// EnsureOption configures options for directory operations.
+// It allows adjusting directory creation details for a single directory operation.
 type EnsureOption func(*ensureConfig)
 
 type ensureConfig struct {
@@ -13,8 +14,9 @@ func defaultEnsureConfig(defaultPerm fs.FileMode) ensureConfig {
 	return ensureConfig{dirPerm: defaultPerm}
 }
 
-// WithEnsureDirPerm sets the directory permission used for a single Ensure*Dir call.
-// Invalid values are ignored and the resolver default permission is used instead.
+// WithEnsureDirPerm sets the directory permission when creating a directory.
+//
+// Invalid permissions are ignored and the default is used instead.
 func WithEnsureDirPerm(perm fs.FileMode) EnsureOption {
 	return func(cfg *ensureConfig) {
 		if cfg == nil {

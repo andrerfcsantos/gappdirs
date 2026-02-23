@@ -45,7 +45,7 @@ func TestEnsureCacheDirUsesDefaultPermSetting(t *testing.T) {
 	)
 
 	if r.ctx.defaultDirPerm != 0o700 {
-		t.Fatalf("resolver default permission mismatch: want %o, got %o", 0o700, r.ctx.defaultDirPerm)
+		t.Fatalf("Resolver default permission mismatch: want %o, got %o", 0o700, r.ctx.defaultDirPerm)
 	}
 
 	created, err := r.EnsureCacheDir()

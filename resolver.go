@@ -6,128 +6,134 @@ import (
 	"unicode"
 )
 
-// Scope determines which directory layers are searched.
+// Scope determines which directory layers are searched for each lookup.
+//
+// It allows callers to control the level of visibility and persistence for their
+// files, choosing between project-local, per-user, or machine-wide system directories.
 type Scope int
 
 const (
-	// ScopeLocal searches current working directory, then user directories, then system directories.
+	// ScopeLocal includes the current working directory as the highest priority,
+	// falling back to user directories, and then system directories.
 	ScopeLocal Scope = iota
-	// ScopeUser searches user directories, then system directories.
+	// ScopeUser includes user-specific directories as the highest priority,
+	// falling back to system directories.
 	ScopeUser
-	// ScopeSystem searches only system directories.
+	// ScopeSystem includes only machine-wide system directories, ignoring user
+	// and local paths.
 	ScopeSystem
 )
 
 type dirLookupFunc func(appName string, cat category) ([]string, error)
 
-// Resolver is the public interface for resolving application directories.
-type Resolver interface {
-	DataDirs() []string
-	ConfigDirs() []string
-	LogDirs() []string
-	CacheDirs() []string
-	DataDir() string
-	ConfigDir() string
-	LogDir() string
-	CacheDir() string
-	EnsureDataDir(opts ...EnsureOption) (string, error)
-	EnsureConfigDir(opts ...EnsureOption) (string, error)
-	EnsureLogDir(opts ...EnsureOption) (string, error)
-	EnsureCacheDir(opts ...EnsureOption) (string, error)
-	FindDataFiles(filename string) ([]string, error)
-	FindConfigFiles(filename string) ([]string, error)
-	FindLogFiles(filename string) ([]string, error)
-	FindCacheFiles(filename string) ([]string, error)
-	FindDataFile(filename string) (string, error)
-	FindConfigFile(filename string) (string, error)
-	FindLogFile(filename string) (string, error)
-	FindCacheFile(filename string) (string, error)
-}
-
-// resolver resolves application directories for the current OS.
-type resolver struct {
+// Resolver resolves application directories for the current platform.
+// It can be used for several operations of lookup and creation of application files and directories for the same scope and app name.
+// If you just need a single operation, you might want to use the global functions of the module instead.
+type Resolver struct {
 	ctx scopedContext
 }
 
+// ErrNotFound indicates that a requested file was not found in any of the searched directories.
+//
+// It is returned by all Find*File methods to allow callers to handle missing
+// files—like falling back to defaults or creating new files—without performing
+// string matching on errors.
 var ErrNotFound = errors.New("gappdirs: no matching path found")
 
-// ensures that resolver implements the Resolver interface at compile time.
-var _ Resolver = (*resolver)(nil)
-
-// NewResolver creates a resolver with functional options.
-func NewResolver(appName string, opts ...Option) Resolver {
-	return newResolver(appName, opts, platformUserDirs, platformSystemDirs)
+// NewUserResolver creates a Resolver configured to search user directories first,
+// followed by system directories.
+//
+// It is the standard choice for most applications that store per-user configuration,
+// data, and caches, while optionally reading machine-wide system defaults as a fallback.
+func NewUserResolver(appName string, opts ...ResolverOption) *Resolver {
+	return newScopedResolver(appName, ScopeUser, opts, platformUserDirs, platformSystemDirs)
 }
 
-// NewUserResolver creates a resolver that always uses user scope.
-func NewUserResolver(appName string, opts ...Option) Resolver {
-	fixedScope := ScopeUser
-	return newResolverWithScope(appName, opts, platformUserDirs, platformSystemDirs, &fixedScope)
+// NewSystemResolver creates a Resolver configured to search only machine-wide system directories.
+//
+// It is useful for system services, daemons, or tools that manage shared assets
+// and must intentionally ignore any user-specific or local overrides.
+func NewSystemResolver(appName string, opts ...ResolverOption) *Resolver {
+	return newScopedResolver(appName, ScopeSystem, opts, platformUserDirs, platformSystemDirs)
 }
 
-// NewSystemResolver creates a resolver that always uses system scope.
-func NewSystemResolver(appName string, opts ...Option) Resolver {
-	fixedScope := ScopeSystem
-	return newResolverWithScope(appName, opts, platformUserDirs, platformSystemDirs, &fixedScope)
+// NewLocalResolver creates a Resolver configured to search local directories first,
+// followed by user and then system directories.
+//
+// It is typically used for development tools or applications that support project-local
+// configuration overrides while keeping standard fallback behavior.
+// Use the WithLocalDir or WithLocalDirs options to set the local directories.
+func NewLocalResolver(appName string, opts ...ResolverOption) *Resolver {
+	return newScopedResolver(appName, ScopeLocal, opts, platformUserDirs, platformSystemDirs)
 }
 
-// NewLocalResolver creates a resolver that always uses local scope.
-func NewLocalResolver(appName string, opts ...Option) Resolver {
-	fixedScope := ScopeLocal
-	return newResolverWithScope(appName, opts, platformUserDirs, platformSystemDirs, &fixedScope)
+func newScopedResolver(appName string, scope Scope, opts []ResolverOption, userDirsFn, systemDirsFn dirLookupFunc) *Resolver {
+	ctx := buildScopedContext(appName, scope, opts, userDirsFn, systemDirsFn)
+	return &Resolver{ctx: ctx}
 }
 
-func newResolver(appName string, opts []Option, userDirsFn, systemDirsFn dirLookupFunc) *resolver {
-	return newResolverWithScope(appName, opts, userDirsFn, systemDirsFn, nil)
-}
-
-func newResolverWithScope(appName string, opts []Option, userDirsFn, systemDirsFn dirLookupFunc, forcedScope *Scope) *resolver {
-	ctx := buildScopedContext(appName, opts, userDirsFn, systemDirsFn, forcedScope)
-	return &resolver{ctx: ctx}
-}
-
-// DataDirs returns all data directories in precedence order for the resolver scope.
-func (r *resolver) DataDirs() []string {
+// DataDirs returns all candidate data directories paths, in precedence order for the resolver's scope and app name.
+//
+// The paths returned are not guaranteed to exist on the filesystem.
+// Use EnsureDataDir to ensure the highest-precedence data directory exists and get its path.
+func (r *Resolver) DataDirs() []string {
 	return scopedDirs(r.ctx, categoryData)
 }
 
-// ConfigDirs returns all config directories in precedence order for the resolver scope.
-func (r *resolver) ConfigDirs() []string {
+// ConfigDirs returns all candidate config directories paths, in precedence order for the resolver's scope and app name.
+//
+// The paths returned are not guaranteed to exist on the filesystem.
+// Use EnsureConfigDir to ensure the highest-precedence config directory exists and get its path.
+func (r *Resolver) ConfigDirs() []string {
 	return scopedDirs(r.ctx, categoryConfig)
 }
 
-// LogDirs returns all log directories in precedence order for the resolver scope.
-func (r *resolver) LogDirs() []string {
+// LogDirs returns all candidate log directories paths, in precedence order for the resolver's scope and app name.
+//
+// The paths returned are not guaranteed to exist on the filesystem.
+// Use EnsureLogDir to ensure the highest-precedence log directory exists and get its path.
+func (r *Resolver) LogDirs() []string {
 	return scopedDirs(r.ctx, categoryLog)
 }
 
-// CacheDirs returns all cache directories in precedence order for the resolver scope.
-func (r *resolver) CacheDirs() []string {
+// CacheDirs returns all candidate cache directories paths, in precedence order for the resolver's scope and app name.
+//
+// The paths returned are not guaranteed to exist on the filesystem.
+// Use EnsureCacheDir to ensure the highest-precedence cache directory exists and get its path.
+func (r *Resolver) CacheDirs() []string {
 	return scopedDirs(r.ctx, categoryCache)
 }
 
-// DataDir returns the first data directory by precedence.
-func (r *resolver) DataDir() string {
+// DataDir returns the single highest-precedence data directory path for the resolver's scope and app name.
+//
+// The path returned is not guaranteed to exist on the filesystem.
+// Use EnsureDataDir to ensure the highest-precedence data directory exists and get its path.
+func (r *Resolver) DataDir() string {
 	return scopedDir(r.ctx, categoryData)
 }
 
-// ConfigDir returns the first config directory by precedence.
-func (r *resolver) ConfigDir() string {
+// ConfigDir returns the single highest-precedence config directory path for the resolver's scope and app name.
+//
+// The path returned is not guaranteed to exist on the filesystem.
+// Use EnsureConfigDir to ensure the highest-precedence config directory exists and get its path.
+func (r *Resolver) ConfigDir() string {
 	return scopedDir(r.ctx, categoryConfig)
 }
 
-// LogDir returns the first log directory by precedence.
-func (r *resolver) LogDir() string {
+// LogDir returns the single highest-precedence log directory path for the resolver's scope and app name.
+//
+// The path returned is not guaranteed to exist on the filesystem.
+// Use EnsureLogDir to ensure the highest-precedence log directory exists and get its path.
+func (r *Resolver) LogDir() string {
 	return scopedDir(r.ctx, categoryLog)
 }
 
-// CacheDir returns the first cache directory by precedence.
-func (r *resolver) CacheDir() string {
+// CacheDir returns the single highest-precedence cache directory path for the resolver's scope and app name.
+//
+// The path returned is not guaranteed to exist on the filesystem.
+// Use EnsureCacheDir to ensure the highest-precedence cache directory exists and get its path.
+func (r *Resolver) CacheDir() string {
 	return scopedDir(r.ctx, categoryCache)
-}
-
-func (r *resolver) scopedCtx() (scopedContext, error) {
-	return r.ctx, nil
 }
 
 func sanitizeAppName(appName string) string {
@@ -157,11 +163,4 @@ func isInvalidAppNameRune(r rune) bool {
 	default:
 		return false
 	}
-}
-
-func (r *resolver) validateReady() error {
-	if r == nil {
-		return errors.New("gappdirs: nil resolver")
-	}
-	return nil
 }

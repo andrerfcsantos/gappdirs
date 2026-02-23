@@ -13,23 +13,25 @@ func TestBuildScopedContext(t *testing.T) {
 	userFn := func(string, category) ([]string, error) { return []string{filepath.Join(wd, "user")}, nil }
 	systemFn := func(string, category) ([]string, error) { return []string{filepath.Join(wd, "system")}, nil }
 
-	t.Run("applies options and forced scope", func(t *testing.T) {
-		forcedScope := ScopeSystem
+	t.Run("applies options and explicit scope", func(t *testing.T) {
 		ctx := buildScopedContext(
 			"A/B Demo",
-			[]Option{WithScope(ScopeLocal), WithWorkingDir(wd), WithDefaultDirPerm(0o700)},
+			ScopeSystem,
+			[]ResolverOption{WithLocalDir(wd), WithDefaultDirPerm(0o700)},
 			userFn,
 			systemFn,
-			&forcedScope,
 		)
 		if ctx.appName != "A_B_Demo" {
 			t.Fatalf("sanitized app name mismatch: want %q, got %q", "A_B_Demo", ctx.appName)
 		}
 		if ctx.scope != ScopeSystem {
-			t.Fatalf("forced scope mismatch: want %s, got %s", ScopeSystem, ctx.scope)
+			t.Fatalf("scope mismatch: want %s, got %s", ScopeSystem, ctx.scope)
 		}
 		if ctx.defaultDirPerm != 0o700 {
 			t.Fatalf("default dir perm mismatch: want %o, got %o", 0o700, ctx.defaultDirPerm)
+		}
+		if !reflect.DeepEqual(ctx.workingDirs, []string{wd}) {
+			t.Fatalf("working dirs mismatch: want %#v, got %#v", []string{wd}, ctx.workingDirs)
 		}
 	})
 }
@@ -42,8 +44,8 @@ func TestNewDefaultScopedContext(t *testing.T) {
 	if ctx.scope != ScopeLocal {
 		t.Fatalf("scope mismatch: want %s, got %s", ScopeLocal, ctx.scope)
 	}
-	if ctx.defaultDirPerm != defaultDirPerm {
-		t.Fatalf("default dir perm mismatch: want %o, got %o", defaultDirPerm, ctx.defaultDirPerm)
+	if ctx.defaultDirPerm != DefaultDirPerm {
+		t.Fatalf("default dir perm mismatch: want %o, got %o", DefaultDirPerm, ctx.defaultDirPerm)
 	}
 	if ctx.userDirsFn == nil || ctx.systemDirsFn == nil {
 		t.Fatal("default providers must be set")
@@ -57,7 +59,8 @@ func TestScopedEnsureDir(t *testing.T) {
 
 	ctx := buildScopedContext(
 		"demo",
-		[]Option{WithScope(ScopeUser), WithWorkingDir(wd), WithDefaultDirPerm(0o700)},
+		ScopeUser,
+		[]ResolverOption{WithLocalDir(wd), WithDefaultDirPerm(0o700)},
 		func(_ string, cat category) ([]string, error) {
 			if cat != categoryCache {
 				return nil, nil
@@ -70,7 +73,6 @@ func TestScopedEnsureDir(t *testing.T) {
 			}
 			return []string{systemCache}, nil
 		},
-		nil,
 	)
 
 	created, err := scopedEnsureDir(ctx, categoryCache)
@@ -101,7 +103,8 @@ func TestScopedFindFilesAndFile(t *testing.T) {
 
 	ctx := buildScopedContext(
 		"demo",
-		[]Option{WithScope(ScopeLocal), WithWorkingDir(wd)},
+		ScopeLocal,
+		[]ResolverOption{WithLocalDir(wd)},
 		func(_ string, cat category) ([]string, error) {
 			if cat != categoryConfig {
 				return nil, nil
@@ -114,7 +117,6 @@ func TestScopedFindFilesAndFile(t *testing.T) {
 			}
 			return []string{systemConfig}, nil
 		},
-		nil,
 	)
 
 	if err := os.MkdirAll(localConfig, 0o755); err != nil {
@@ -178,10 +180,10 @@ func TestWorkingDirResolutionIsDeferredToLocalScope(t *testing.T) {
 
 	ctx := buildScopedContext(
 		"demo",
-		[]Option{WithScope(ScopeLocal)},
+		ScopeLocal,
+		nil,
 		func(string, category) ([]string, error) { return []string{filepath.Join(preBuildWD, "user")}, nil },
 		func(string, category) ([]string, error) { return []string{filepath.Join(preBuildWD, "system")}, nil },
-		nil,
 	)
 
 	if err := os.Chdir(runtimeWD); err != nil {
@@ -199,14 +201,69 @@ func TestWorkingDirResolutionIsDeferredToLocalScope(t *testing.T) {
 	}
 }
 
+func TestScopedLocalDirsHonorConfiguredPriority(t *testing.T) {
+	base := t.TempDir()
+	localA := filepath.Join(base, "project-a")
+	localB := filepath.Join(base, "project-b")
+	userData := filepath.Join(base, "user", "data")
+	systemData := filepath.Join(base, "system", "data")
+
+	ctx := buildScopedContext(
+		"demo",
+		ScopeLocal,
+		[]ResolverOption{WithLocalDirs(localA, localB)},
+		func(string, category) ([]string, error) { return []string{userData}, nil },
+		func(string, category) ([]string, error) { return []string{systemData}, nil },
+	)
+
+	got := scopedDirs(ctx, categoryData)
+	want := []string{
+		filepath.Join(localA, ".demo", "data"),
+		filepath.Join(localB, ".demo", "data"),
+		userData,
+		systemData,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("local scope order mismatch:\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
+func TestScopedEnsureDirUsesFirstLocalDirWhenMultipleConfigured(t *testing.T) {
+	base := t.TempDir()
+	localA := filepath.Join(base, "project-a")
+	localB := filepath.Join(base, "project-b")
+
+	ctx := buildScopedContext(
+		"demo",
+		ScopeLocal,
+		[]ResolverOption{WithLocalDirs(localA, localB)},
+		func(string, category) ([]string, error) { return nil, nil },
+		func(string, category) ([]string, error) { return nil, nil },
+	)
+
+	created, err := scopedEnsureDir(ctx, categoryCache)
+	if err != nil {
+		t.Fatalf("scoped ensure dir: %v", err)
+	}
+
+	want := filepath.Join(localA, ".demo", "cache")
+	if created != want {
+		t.Fatalf("created dir mismatch: want %q, got %q", want, created)
+	}
+
+	if info, err := os.Stat(created); err != nil || !info.IsDir() {
+		t.Fatalf("expected created directory %q to exist", created)
+	}
+}
+
 func TestUserScopeDoesNotRequireWorkingDirResolution(t *testing.T) {
 	base := t.TempDir()
 	ctx := buildScopedContext(
 		"demo",
-		[]Option{WithScope(ScopeUser), WithWorkingDir("relative-working-dir")},
+		ScopeUser,
+		[]ResolverOption{WithLocalDir("relative-working-dir")},
 		func(string, category) ([]string, error) { return []string{filepath.Join(base, "user")}, nil },
 		func(string, category) ([]string, error) { return []string{filepath.Join(base, "system")}, nil },
-		nil,
 	)
 
 	dirs := scopedDirs(ctx, categoryData)
@@ -216,15 +273,20 @@ func TestUserScopeDoesNotRequireWorkingDirResolution(t *testing.T) {
 	}
 }
 
-func TestInvalidScopeFallsBackToUserSemantics(t *testing.T) {
+func TestBuildScopedContextInvalidScopeFallsBackToUser(t *testing.T) {
 	base := t.TempDir()
-	ctx := scopedContext{
-		appName:      "demo",
-		scope:        Scope(-1),
-		workingDir:   "",
-		userDirsFn:   func(string, category) ([]string, error) { return []string{filepath.Join(base, "user")}, nil },
-		systemDirsFn: func(string, category) ([]string, error) { return []string{filepath.Join(base, "system")}, nil },
+	ctx := buildScopedContext(
+		"demo",
+		Scope(-1),
+		nil,
+		func(string, category) ([]string, error) { return []string{filepath.Join(base, "user")}, nil },
+		func(string, category) ([]string, error) { return []string{filepath.Join(base, "system")}, nil },
+	)
+
+	if ctx.scope != ScopeUser {
+		t.Fatalf("scope fallback mismatch: want %s, got %s", ScopeUser, ctx.scope)
 	}
+
 	dirs := scopedDirs(ctx, categoryData)
 	want := []string{filepath.Join(base, "user"), filepath.Join(base, "system")}
 	if !reflect.DeepEqual(dirs, want) {
@@ -238,10 +300,10 @@ func TestScopedDirsIgnoresProviderErrorsWhenOtherSourcesExist(t *testing.T) {
 
 	ctxUser := buildScopedContext(
 		"demo",
-		[]Option{WithScope(ScopeUser), WithWorkingDir(base)},
+		ScopeUser,
+		[]ResolverOption{WithLocalDir(base)},
 		func(string, category) ([]string, error) { return nil, errors.New("user provider failed") },
 		func(string, category) ([]string, error) { return []string{systemData}, nil },
-		nil,
 	)
 	gotUser := scopedDirs(ctxUser, categoryData)
 	wantUser := []string{systemData}
@@ -251,10 +313,10 @@ func TestScopedDirsIgnoresProviderErrorsWhenOtherSourcesExist(t *testing.T) {
 
 	ctxLocal := buildScopedContext(
 		"demo",
-		[]Option{WithScope(ScopeLocal), WithWorkingDir(base)},
+		ScopeLocal,
+		[]ResolverOption{WithLocalDir(base)},
 		func(string, category) ([]string, error) { return nil, errors.New("user provider failed") },
 		func(string, category) ([]string, error) { return []string{systemData}, nil },
-		nil,
 	)
 	gotLocal := scopedDirs(ctxLocal, categoryData)
 	wantLocal := []string{filepath.Join(base, ".demo", "data"), systemData}
@@ -266,10 +328,10 @@ func TestScopedDirsIgnoresProviderErrorsWhenOtherSourcesExist(t *testing.T) {
 func TestScopedDirsReturnsEmptyWhenAllProvidersFail(t *testing.T) {
 	ctx := buildScopedContext(
 		"demo",
-		[]Option{WithScope(ScopeUser)},
+		ScopeUser,
+		nil,
 		func(string, category) ([]string, error) { return nil, errors.New("user provider failed") },
 		func(string, category) ([]string, error) { return nil, errors.New("system provider failed") },
-		nil,
 	)
 
 	gotDirs := scopedDirs(ctx, categoryData)

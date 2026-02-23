@@ -72,6 +72,90 @@ func TestTopLevelScopedEnsureParity(t *testing.T) {
 	}
 }
 
+func TestTopLevelScopedCreateFileParity(t *testing.T) {
+	setupTopLevelTestEnv(t)
+	appName := "demo_top_level_create"
+
+	for _, scope := range testScopes {
+		r := newResolverForScope(scope, appName)
+
+		for _, cat := range testCategories {
+			filename := fmt.Sprintf("created_%s_%s.txt", scope, cat)
+			targetPath := filepath.Join(callTopDir(scope, cat, appName), filename)
+
+			t.Run(fmt.Sprintf("create_new_%s_%s", scope, cat), func(t *testing.T) {
+				_ = os.Remove(targetPath)
+
+				topCreated, topPath, topErr := callTopCreateFile(scope, cat, appName, filename, WithContentsFromReader(strings.NewReader("seed")))
+				if topErr == nil {
+					_ = os.Remove(topPath)
+				}
+
+				resolverCreated, resolverPath, resolverErr := callResolverCreateFile(r, cat, filename, WithContentsFromReader(strings.NewReader("seed")))
+				assertParity(t, topCreated, topErr, resolverCreated, resolverErr)
+				assertParity(t, topPath, topErr, resolverPath, resolverErr)
+			})
+
+			t.Run(fmt.Sprintf("existing_no_overwrite_%s_%s", scope, cat), func(t *testing.T) {
+				seeded := seedExactFilePath(targetPath, "existing")
+
+				topCreated, topPath, topErr := callTopCreateFile(scope, cat, appName, filename, WithContentsFromReader(strings.NewReader("new-content")))
+				resolverCreated, resolverPath, resolverErr := callResolverCreateFile(r, cat, filename, WithContentsFromReader(strings.NewReader("new-content")))
+				assertParity(t, topCreated, topErr, resolverCreated, resolverErr)
+				assertParity(t, topPath, topErr, resolverPath, resolverErr)
+
+				if seeded && topErr == nil {
+					content, err := os.ReadFile(targetPath)
+					if err != nil {
+						t.Fatalf("read seeded file: %v", err)
+					}
+					if string(content) != "existing" {
+						t.Fatalf("expected existing content to remain untouched, got %q", string(content))
+					}
+				}
+			})
+
+			t.Run(fmt.Sprintf("existing_overwrite_%s_%s", scope, cat), func(t *testing.T) {
+				seeded := seedExactFilePath(targetPath, "existing")
+
+				topCreated, topPath, topErr := callTopCreateFile(
+					scope,
+					cat,
+					appName,
+					filename,
+					WithOverwriteExisting(),
+					WithContentsFromReader(strings.NewReader("new-content")),
+				)
+
+				if seeded {
+					_ = seedExactFilePath(targetPath, "existing")
+				}
+
+				resolverCreated, resolverPath, resolverErr := callResolverCreateFile(
+					r,
+					cat,
+					filename,
+					WithOverwriteExisting(),
+					WithContentsFromReader(strings.NewReader("new-content")),
+				)
+
+				assertParity(t, topCreated, topErr, resolverCreated, resolverErr)
+				assertParity(t, topPath, topErr, resolverPath, resolverErr)
+
+				if seeded && resolverErr == nil {
+					content, err := os.ReadFile(targetPath)
+					if err != nil {
+						t.Fatalf("read overwritten file: %v", err)
+					}
+					if string(content) != "new-content" {
+						t.Fatalf("expected overwritten content %q, got %q", "new-content", string(content))
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestTopLevelScopedFindAndFileParity(t *testing.T) {
 	setupTopLevelTestEnv(t)
 	appName := "demo_top_level_search"
@@ -198,7 +282,7 @@ func setupTopLevelTestEnv(t *testing.T) {
 	}
 }
 
-func newResolverForScope(scope Scope, appName string) Resolver {
+func newResolverForScope(scope Scope, appName string) *Resolver {
 	switch scope {
 	case ScopeLocal:
 		return NewLocalResolver(appName)
@@ -264,6 +348,16 @@ func seedFileInFirstWritableDir(dirs []string, filename string) (string, bool) {
 	}
 
 	return "", false
+}
+
+func seedExactFilePath(path string, content string) bool {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return false
+	}
+	return true
 }
 
 func callTopDirs(scope Scope, cat category, appName string) []string {
@@ -500,7 +594,46 @@ func callTopFindFile(scope Scope, cat category, appName string, filename string)
 	return "", fmt.Errorf("unsupported scope/category: %s/%s", scope, cat)
 }
 
-func callResolverDirs(r Resolver, cat category) []string {
+func callTopCreateFile(scope Scope, cat category, appName string, filename string, opts ...CreateFileOption) (bool, string, error) {
+	switch scope {
+	case ScopeLocal:
+		switch cat {
+		case categoryData:
+			return CreateLocalDataFile(appName, filename, opts...)
+		case categoryConfig:
+			return CreateLocalConfigFile(appName, filename, opts...)
+		case categoryLog:
+			return CreateLocalLogFile(appName, filename, opts...)
+		case categoryCache:
+			return CreateLocalCacheFile(appName, filename, opts...)
+		}
+	case ScopeUser:
+		switch cat {
+		case categoryData:
+			return CreateUserDataFile(appName, filename, opts...)
+		case categoryConfig:
+			return CreateUserConfigFile(appName, filename, opts...)
+		case categoryLog:
+			return CreateUserLogFile(appName, filename, opts...)
+		case categoryCache:
+			return CreateUserCacheFile(appName, filename, opts...)
+		}
+	case ScopeSystem:
+		switch cat {
+		case categoryData:
+			return CreateSystemDataFile(appName, filename, opts...)
+		case categoryConfig:
+			return CreateSystemConfigFile(appName, filename, opts...)
+		case categoryLog:
+			return CreateSystemLogFile(appName, filename, opts...)
+		case categoryCache:
+			return CreateSystemCacheFile(appName, filename, opts...)
+		}
+	}
+	return false, "", fmt.Errorf("unsupported scope/category: %s/%s", scope, cat)
+}
+
+func callResolverDirs(r *Resolver, cat category) []string {
 	switch cat {
 	case categoryData:
 		return r.DataDirs()
@@ -515,7 +648,7 @@ func callResolverDirs(r Resolver, cat category) []string {
 	}
 }
 
-func callResolverDir(r Resolver, cat category) string {
+func callResolverDir(r *Resolver, cat category) string {
 	switch cat {
 	case categoryData:
 		return r.DataDir()
@@ -530,7 +663,7 @@ func callResolverDir(r Resolver, cat category) string {
 	}
 }
 
-func callResolverEnsure(r Resolver, cat category) (string, error) {
+func callResolverEnsure(r *Resolver, cat category) (string, error) {
 	switch cat {
 	case categoryData:
 		return r.EnsureDataDir()
@@ -545,7 +678,7 @@ func callResolverEnsure(r Resolver, cat category) (string, error) {
 	}
 }
 
-func callResolverEnsureWithOpts(r Resolver, cat category, opts ...EnsureOption) (string, error) {
+func callResolverEnsureWithOpts(r *Resolver, cat category, opts ...EnsureOption) (string, error) {
 	switch cat {
 	case categoryData:
 		return r.EnsureDataDir(opts...)
@@ -560,7 +693,7 @@ func callResolverEnsureWithOpts(r Resolver, cat category, opts ...EnsureOption) 
 	}
 }
 
-func callResolverFindFiles(r Resolver, cat category, filename string) ([]string, error) {
+func callResolverFindFiles(r *Resolver, cat category, filename string) ([]string, error) {
 	switch cat {
 	case categoryData:
 		return r.FindDataFiles(filename)
@@ -575,7 +708,7 @@ func callResolverFindFiles(r Resolver, cat category, filename string) ([]string,
 	}
 }
 
-func callResolverFindFile(r Resolver, cat category, filename string) (string, error) {
+func callResolverFindFile(r *Resolver, cat category, filename string) (string, error) {
 	switch cat {
 	case categoryData:
 		return r.FindDataFile(filename)
@@ -587,5 +720,20 @@ func callResolverFindFile(r Resolver, cat category, filename string) (string, er
 		return r.FindCacheFile(filename)
 	default:
 		return "", fmt.Errorf("unsupported category %s", cat)
+	}
+}
+
+func callResolverCreateFile(r *Resolver, cat category, filename string, opts ...CreateFileOption) (bool, string, error) {
+	switch cat {
+	case categoryData:
+		return r.CreateDataFile(filename, opts...)
+	case categoryConfig:
+		return r.CreateConfigFile(filename, opts...)
+	case categoryLog:
+		return r.CreateLogFile(filename, opts...)
+	case categoryCache:
+		return r.CreateCacheFile(filename, opts...)
+	default:
+		return false, "", fmt.Errorf("unsupported category %s", cat)
 	}
 }

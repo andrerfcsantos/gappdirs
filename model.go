@@ -3,7 +3,6 @@ package gappdirs
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 )
 
 type category int
@@ -15,6 +14,9 @@ const (
 	categoryCache
 )
 
+// String returns a lowercase string representation of the scope.
+//
+// It returns "local", "user", or "system" for known scopes, and formats unknown scopes as "scope(N)".
 func (s Scope) String() string {
 	switch s {
 	case ScopeLocal:
@@ -28,6 +30,9 @@ func (s Scope) String() string {
 	}
 }
 
+// String returns a lowercase string representation of the category.
+//
+// It returns "data", "config", "log", or "cache" for known categories, and formats unknown categories as "category(N)".
 func (c category) String() string {
 	switch c {
 	case categoryData:
@@ -75,17 +80,4 @@ func tryNormalizeAbsolutePath(path string) (string, error) {
 		return path, fmt.Errorf("gappdirs: normalize path %q: %w", path, err)
 	}
 	return absPath, nil
-}
-
-func splitAbsolutePathList(pathList string) []string {
-	rawItems := filepath.SplitList(pathList)
-	out := make([]string, 0, len(rawItems))
-	for _, item := range rawItems {
-		item = strings.TrimSpace(item)
-		if item == "" || !filepath.IsAbs(item) {
-			continue
-		}
-		out = append(out, filepath.Clean(item))
-	}
-	return out
 }

@@ -7,23 +7,20 @@ import (
 	"testing"
 )
 
-func TestNewResolverAppliesOptions(t *testing.T) {
+func TestScopedConstructorsApplyOptions(t *testing.T) {
 	t.Run("missing app name defaults", func(t *testing.T) {
-		r := NewResolver("")
-		impl, ok := r.(*resolver)
-		if !ok {
-			t.Fatalf("unexpected resolver implementation type: %T", r)
-		}
-		if impl.ctx.appName != "unnamed_app" {
-			t.Fatalf("default app name mismatch: want %q, got %q", "unnamed_app", impl.ctx.appName)
+		r := NewUserResolver("")
+		if r.ctx.appName != "unnamed_app" {
+			t.Fatalf("default app name mismatch: want %q, got %q", "unnamed_app", r.ctx.appName)
 		}
 	})
 
 	t.Run("sanitizes app name", func(t *testing.T) {
 		wd := t.TempDir()
-		r := newResolver(
+		r := newScopedResolver(
 			"A/B Demo",
-			[]Option{WithScope(ScopeLocal), WithWorkingDir(wd)},
+			ScopeLocal,
+			[]ResolverOption{WithLocalDir(wd)},
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "u")}, nil },
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "s")}, nil },
 		)
@@ -39,48 +36,48 @@ func TestNewResolverAppliesOptions(t *testing.T) {
 	})
 
 	t.Run("nil option is ignored", func(t *testing.T) {
-		r := NewResolver("demo", nil)
-		impl, ok := r.(*resolver)
-		if !ok {
-			t.Fatalf("unexpected resolver implementation type: %T", r)
-		}
-		if impl.ctx.scope != ScopeUser {
-			t.Fatalf("default scope mismatch: want %s, got %s", ScopeUser, impl.ctx.scope)
+		r := NewUserResolver("demo", nil)
+		if r.ctx.scope != ScopeUser {
+			t.Fatalf("scope mismatch: want %s, got %s", ScopeUser, r.ctx.scope)
 		}
 	})
 
-	t.Run("default scope and permissions", func(t *testing.T) {
+	t.Run("default permissions are applied", func(t *testing.T) {
 		wd := t.TempDir()
-		r := newResolver(
+		r := newScopedResolver(
 			"demo",
-			[]Option{WithWorkingDir(wd)},
+			ScopeSystem,
+			[]ResolverOption{WithLocalDir(wd)},
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "u")}, nil },
 			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "s")}, nil },
 		)
-		if r.ctx.scope != ScopeUser {
-			t.Fatalf("default scope mismatch: want %s, got %s", ScopeUser, r.ctx.scope)
+		if r.ctx.scope != ScopeSystem {
+			t.Fatalf("scope mismatch: want %s, got %s", ScopeSystem, r.ctx.scope)
 		}
-		if r.ctx.defaultDirPerm != defaultDirPerm {
-			t.Fatalf("default dir permission mismatch: want %o, got %o", defaultDirPerm, r.ctx.defaultDirPerm)
+		if r.ctx.defaultDirPerm != DefaultDirPerm {
+			t.Fatalf("default dir permission mismatch: want %o, got %o", DefaultDirPerm, r.ctx.defaultDirPerm)
 		}
 	})
 
-	t.Run("duplicate options use last value", func(t *testing.T) {
-		wd := t.TempDir()
-		r := newResolver(
+	t.Run("working dir options append in order and dedupe", func(t *testing.T) {
+		wdA := t.TempDir()
+		wdB := t.TempDir()
+		wdC := t.TempDir()
+		r := newScopedResolver(
 			"demo",
-			[]Option{
-				WithWorkingDir(wd),
-				WithScope(ScopeSystem),
-				WithScope(ScopeLocal),
+			ScopeLocal,
+			[]ResolverOption{
+				WithLocalDir(wdA),
+				WithLocalDirs("", wdB, wdA, "  ", wdC, wdB),
 				WithDefaultDirPerm(0o700),
 				WithDefaultDirPerm(0o750),
 			},
-			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "u")}, nil },
-			func(string, category) ([]string, error) { return []string{filepath.Join(wd, "s")}, nil },
+			func(string, category) ([]string, error) { return []string{filepath.Join(wdB, "u")}, nil },
+			func(string, category) ([]string, error) { return []string{filepath.Join(wdB, "s")}, nil },
 		)
-		if r.ctx.scope != ScopeLocal {
-			t.Fatalf("scope mismatch: want %s, got %s", ScopeLocal, r.ctx.scope)
+		wantWorkingDirs := []string{wdA, wdB, wdC}
+		if !reflect.DeepEqual(r.ctx.workingDirs, wantWorkingDirs) {
+			t.Fatalf("working dirs mismatch:\nwant: %#v\ngot:  %#v", wantWorkingDirs, r.ctx.workingDirs)
 		}
 		if r.ctx.defaultDirPerm != 0o750 {
 			t.Fatalf("permission mismatch: want %o, got %o", 0o750, r.ctx.defaultDirPerm)
@@ -88,36 +85,24 @@ func TestNewResolverAppliesOptions(t *testing.T) {
 	})
 }
 
-func TestScopedConstructorsForceScope(t *testing.T) {
-	type scopedCtor func(string, ...Option) Resolver
+func TestScopedConstructorsSetExpectedScope(t *testing.T) {
+	type scopedCtor func(string, ...ResolverOption) *Resolver
 
 	for _, tc := range []struct {
-		name        string
-		ctor        scopedCtor
-		conflicting Scope
-		wantScope   Scope
+		name      string
+		ctor      scopedCtor
+		wantScope Scope
 	}{
-		{name: "user", ctor: NewUserResolver, conflicting: ScopeLocal, wantScope: ScopeUser},
-		{name: "system", ctor: NewSystemResolver, conflicting: ScopeLocal, wantScope: ScopeSystem},
-		{name: "local", ctor: NewLocalResolver, conflicting: ScopeSystem, wantScope: ScopeLocal},
+		{name: "user", ctor: NewUserResolver, wantScope: ScopeUser},
+		{name: "system", ctor: NewSystemResolver, wantScope: ScopeSystem},
+		{name: "local", ctor: NewLocalResolver, wantScope: ScopeLocal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := tc.ctor("demo", WithScope(tc.conflicting), WithWorkingDir(t.TempDir()))
-			impl, ok := r.(*resolver)
-			if !ok {
-				t.Fatalf("unexpected resolver implementation type: %T", r)
-			}
-			if impl.ctx.scope != tc.wantScope {
-				t.Fatalf("scope mismatch: want %s, got %s", tc.wantScope, impl.ctx.scope)
+			r := tc.ctor("demo", WithLocalDir(t.TempDir()))
+			if r.ctx.scope != tc.wantScope {
+				t.Fatalf("scope mismatch: want %s, got %s", tc.wantScope, r.ctx.scope)
 			}
 		})
-	}
-}
-
-func TestConstructorsReturnResolverInterface(t *testing.T) {
-	r := NewResolver("demo", WithWorkingDir(t.TempDir()))
-	if _, ok := r.(*resolver); !ok {
-		t.Fatalf("expected private resolver implementation, got %T", r)
 	}
 }
 
@@ -150,29 +135,22 @@ func TestOptionFallbacks(t *testing.T) {
 	userFn := func(string, category) ([]string, error) { return []string{filepath.Join(wd, "u")}, nil }
 	systemFn := func(string, category) ([]string, error) { return []string{filepath.Join(wd, "s")}, nil }
 
-	t.Run("invalid scope defaults to user", func(t *testing.T) {
-		r := newResolver("demo", []Option{WithScope(Scope(-1)), WithWorkingDir(wd)}, userFn, systemFn)
-		if r.ctx.scope != ScopeUser {
-			t.Fatalf("scope fallback mismatch: want %s, got %s", ScopeUser, r.ctx.scope)
-		}
-	})
-
 	t.Run("empty working dir option is ignored", func(t *testing.T) {
-		r := newResolver("demo", []Option{WithWorkingDir("  ")}, userFn, systemFn)
-		if r.ctx.workingDir != "" {
-			t.Fatalf("working dir should remain empty when option is ignored, got %q", r.ctx.workingDir)
+		r := newScopedResolver("demo", ScopeUser, []ResolverOption{WithLocalDir("  ")}, userFn, systemFn)
+		if len(r.ctx.workingDirs) != 0 {
+			t.Fatalf("working dirs should remain empty when option is ignored, got %#v", r.ctx.workingDirs)
 		}
 	})
 
 	t.Run("invalid permission falls back to default", func(t *testing.T) {
-		r := newResolver("demo", []Option{WithDefaultDirPerm(0), WithWorkingDir(wd)}, userFn, systemFn)
-		if r.ctx.defaultDirPerm != defaultDirPerm {
-			t.Fatalf("permission fallback mismatch: want %o, got %o", defaultDirPerm, r.ctx.defaultDirPerm)
+		r := newScopedResolver("demo", ScopeUser, []ResolverOption{WithDefaultDirPerm(0), WithLocalDir(wd)}, userFn, systemFn)
+		if r.ctx.defaultDirPerm != DefaultDirPerm {
+			t.Fatalf("permission fallback mismatch: want %o, got %o", DefaultDirPerm, r.ctx.defaultDirPerm)
 		}
 
-		r = newResolver("demo", []Option{WithDefaultDirPerm(fs.ModeDir | 0o755), WithWorkingDir(wd)}, userFn, systemFn)
-		if r.ctx.defaultDirPerm != defaultDirPerm {
-			t.Fatalf("permission fallback mismatch for mode bits: want %o, got %o", defaultDirPerm, r.ctx.defaultDirPerm)
+		r = newScopedResolver("demo", ScopeUser, []ResolverOption{WithDefaultDirPerm(fs.ModeDir | 0o755), WithLocalDir(wd)}, userFn, systemFn)
+		if r.ctx.defaultDirPerm != DefaultDirPerm {
+			t.Fatalf("permission fallback mismatch for mode bits: want %o, got %o", DefaultDirPerm, r.ctx.defaultDirPerm)
 		}
 	})
 }
@@ -193,10 +171,13 @@ func TestDirsScopeOrdering(t *testing.T) {
 		categoryConfig: {systemConfig},
 	}
 
-	rLocal := mustResolver(t, ScopeLocal, wd, user, system)
+	localWorkingDirA := t.TempDir()
+	localWorkingDirB := t.TempDir()
+	rLocal := mustResolverWithLocalDirs(t, ScopeLocal, []string{localWorkingDirA, localWorkingDirB}, user, system)
 	gotLocal := rLocal.DataDirs()
 	wantLocal := []string{
-		filepath.Join(wd, ".demo", "data"),
+		filepath.Join(localWorkingDirA, ".demo", "data"),
+		filepath.Join(localWorkingDirB, ".demo", "data"),
 		userData,
 		systemData,
 	}
@@ -240,14 +221,19 @@ func TestDirMethods(t *testing.T) {
 	}
 }
 
-func mustResolver(t *testing.T, scope Scope, workingDir string, user map[category][]string, system map[category][]string, extraOpts ...Option) *resolver {
+func mustResolver(t *testing.T, scope Scope, workingDir string, user map[category][]string, system map[category][]string, extraOpts ...ResolverOption) *Resolver {
+	return mustResolverWithLocalDirs(t, scope, []string{workingDir}, user, system, extraOpts...)
+}
+
+func mustResolverWithLocalDirs(t *testing.T, scope Scope, workingDirs []string, user map[category][]string, system map[category][]string, extraOpts ...ResolverOption) *Resolver {
 	t.Helper()
 
-	opts := []Option{WithScope(scope), WithWorkingDir(workingDir)}
+	opts := []ResolverOption{WithLocalDirs(workingDirs...)}
 	opts = append(opts, extraOpts...)
 
-	r := newResolver(
+	r := newScopedResolver(
 		"demo",
+		scope,
 		opts,
 		func(_ string, cat category) ([]string, error) {
 			return append([]string(nil), user[cat]...), nil

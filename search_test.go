@@ -54,6 +54,51 @@ func TestFindFilesAndFindFile(t *testing.T) {
 	}
 }
 
+func TestFindFilesAndFindFileWithMultipleLocalWorkingDirs(t *testing.T) {
+	wd := t.TempDir()
+	localAConfig := filepath.Join(wd, "project-a", ".demo", "config")
+	localBConfig := filepath.Join(wd, "project-b", ".demo", "config")
+	userConfig := filepath.Join(wd, "user", "config")
+	systemConfig := filepath.Join(wd, "system", "config")
+
+	r := mustResolverWithLocalDirs(t, ScopeLocal, []string{
+		filepath.Join(wd, "project-a"),
+		filepath.Join(wd, "project-b"),
+	}, map[category][]string{categoryConfig: {userConfig}}, map[category][]string{categoryConfig: {systemConfig}})
+
+	for _, dir := range []string{localAConfig, localBConfig, userConfig, systemConfig} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %q: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "settings.yaml"), []byte(dir), 0o644); err != nil {
+			t.Fatalf("write %q: %v", dir, err)
+		}
+	}
+
+	gotFiles, err := r.FindConfigFiles("settings.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantFiles := []string{
+		filepath.Join(localAConfig, "settings.yaml"),
+		filepath.Join(localBConfig, "settings.yaml"),
+		filepath.Join(userConfig, "settings.yaml"),
+		filepath.Join(systemConfig, "settings.yaml"),
+	}
+	if !reflect.DeepEqual(gotFiles, wantFiles) {
+		t.Fatalf("matching files mismatch:\nwant: %#v\ngot:  %#v", wantFiles, gotFiles)
+	}
+
+	gotFile, err := r.FindConfigFile("settings.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantFile := filepath.Join(localAConfig, "settings.yaml")
+	if gotFile != wantFile {
+		t.Fatalf("most relevant file mismatch: want %q, got %q", wantFile, gotFile)
+	}
+}
+
 func TestFileNotFound(t *testing.T) {
 	wd := t.TempDir()
 	r := mustResolver(t, ScopeUser, wd,

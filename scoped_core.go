@@ -1,7 +1,9 @@
 package gappdirs
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,13 +13,13 @@ import (
 type scopedContext struct {
 	appName        string
 	scope          Scope
-	workingDir     string
+	workingDirs    []string
 	defaultDirPerm fs.FileMode
 	userDirsFn     dirLookupFunc
 	systemDirsFn   dirLookupFunc
 }
 
-func buildScopedContext(appName string, opts []Option, userDirsFn, systemDirsFn dirLookupFunc, forcedScope *Scope) scopedContext {
+func buildScopedContext(appName string, scope Scope, opts []ResolverOption, userDirsFn, systemDirsFn dirLookupFunc) scopedContext {
 	appName = sanitizeAppName(appName)
 
 	cfg := defaultConfig()
@@ -27,19 +29,17 @@ func buildScopedContext(appName string, opts []Option, userDirsFn, systemDirsFn 
 		}
 		opt(&cfg)
 	}
-	if forcedScope != nil {
-		switch *forcedScope {
-		case ScopeLocal, ScopeUser, ScopeSystem:
-			cfg.scope = *forcedScope
-		default:
-			cfg.scope = ScopeUser
-		}
+
+	switch scope {
+	case ScopeLocal, ScopeUser, ScopeSystem:
+	default:
+		scope = ScopeUser
 	}
 
 	return scopedContext{
 		appName:        appName,
-		scope:          cfg.scope,
-		workingDir:     strings.TrimSpace(cfg.workingDir),
+		scope:          scope,
+		workingDirs:    append([]string(nil), cfg.workingDirs...),
 		defaultDirPerm: cfg.defaultDirPerm,
 		userDirsFn:     userDirsFn,
 		systemDirsFn:   systemDirsFn,
@@ -47,16 +47,15 @@ func buildScopedContext(appName string, opts []Option, userDirsFn, systemDirsFn 
 }
 
 func newDefaultScopedContext(appName string, scope Scope) scopedContext {
-	fixedScope := scope
-	return buildScopedContext(appName, nil, platformUserDirs, platformSystemDirs, &fixedScope)
+	return buildScopedContext(appName, scope, nil, platformUserDirs, platformSystemDirs)
 }
 
 func scopedDirs(ctx scopedContext, cat category) []string {
 	var candidates []string
 	switch ctx.scope {
 	case ScopeLocal:
-		localDir := scopedLocalDir(ctx, cat)
-		candidates = append(candidates, localDir)
+		localDirs := scopedLocalDirs(ctx, cat)
+		candidates = append(candidates, localDirs...)
 		fallthrough
 	case ScopeUser:
 		userDirs, _ := ctx.userDirsFn(ctx.appName, cat)
@@ -92,6 +91,62 @@ func scopedEnsureDir(ctx scopedContext, cat category, opts ...EnsureOption) (str
 		return "", fmt.Errorf("gappdirs: create directory %q: %w", dir, err)
 	}
 	return dir, nil
+}
+
+func scopedCreateFile(ctx scopedContext, cat category, filename string, opts ...CreateFileOption) (bool, string, error) {
+	dir, err := scopedEnsureDir(ctx, cat)
+	if err != nil {
+		return false, "", err
+	}
+
+	normalizedFileName, err := normalizeFilename(dir, filename)
+	if err != nil {
+		return false, "", err
+	}
+	pathToFile := filepath.Join(dir, normalizedFileName)
+
+	parentDir := filepath.Dir(pathToFile)
+	if err := os.MkdirAll(parentDir, ctx.defaultDirPerm); err != nil {
+		return false, pathToFile, fmt.Errorf("gappdirs: create parent directories for %q: %w", pathToFile, err)
+	}
+
+	cfg := resolveCreateFileOptions(opts)
+
+	exists, err := regularFileExists(pathToFile)
+	if err != nil {
+		return false, pathToFile, err
+	}
+	if exists && !cfg.overwriteExisting {
+		return false, pathToFile, nil
+	}
+
+	flags := os.O_CREATE | os.O_WRONLY
+	if cfg.overwriteExisting {
+		flags |= os.O_TRUNC
+	} else {
+		flags |= os.O_EXCL
+	}
+
+	file, err := os.OpenFile(pathToFile, flags, cfg.filePerm)
+	if err != nil {
+		if !cfg.overwriteExisting && errors.Is(err, os.ErrExist) {
+			return false, pathToFile, nil
+		}
+		return false, pathToFile, fmt.Errorf("gappdirs: open file %q: %w", pathToFile, err)
+	}
+
+	created := !exists
+	if cfg.reader != nil {
+		if _, err := io.Copy(file, cfg.reader); err != nil {
+			_ = file.Close()
+			return created, pathToFile, fmt.Errorf("gappdirs: write file %q: %w", pathToFile, err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		return created, pathToFile, fmt.Errorf("gappdirs: close file %q: %w", pathToFile, err)
+	}
+
+	return created, pathToFile, nil
 }
 
 func findExistingScopedFiles(ctx scopedContext, cat category, filename string) ([]string, error) {
@@ -138,9 +193,19 @@ func findExistingScopedFile(ctx scopedContext, cat category, filename string) (s
 	return "", ErrNotFound
 }
 
-func scopedLocalDir(ctx scopedContext, cat category) string {
-	workingDir := resolveLocalWorkingDir(ctx.workingDir)
-	return filepath.Join(workingDir, "."+ctx.appName, categoryDirName(cat))
+func scopedLocalDirs(ctx scopedContext, cat category) []string {
+	configuredWorkingDirs := ctx.workingDirs
+	if len(configuredWorkingDirs) == 0 {
+		configuredWorkingDirs = []string{""}
+	}
+
+	localDirs := make([]string, 0, len(configuredWorkingDirs))
+	for _, configuredWorkingDir := range configuredWorkingDirs {
+		workingDir := resolveLocalWorkingDir(configuredWorkingDir)
+		localDirs = append(localDirs, filepath.Join(workingDir, "."+ctx.appName, categoryDirName(cat)))
+	}
+
+	return localDirs
 }
 
 func resolveLocalWorkingDir(configuredWorkingDir string) string {
