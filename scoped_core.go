@@ -84,6 +84,24 @@ func scopedDir(ctx scopedContext, cat category) string {
 	return dirs[0]
 }
 
+func scopedFilePaths(ctx scopedContext, cat category, filename string) []string {
+	dirs := scopedDirs(ctx, cat)
+	normalizedFilename := normalizeFilePathFilename(filename)
+	paths := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		paths = append(paths, filepath.Join(dir, normalizedFilename))
+	}
+	return paths
+}
+
+func scopedFilePath(ctx scopedContext, cat category, filename string) string {
+	paths := scopedFilePaths(ctx, cat, filename)
+	if len(paths) == 0 {
+		return ""
+	}
+	return paths[0]
+}
+
 func scopedEnsureDir(ctx scopedContext, cat category, opts ...EnsureOption) (string, error) {
 	dir := scopedDir(ctx, cat)
 	cfg := resolveEnsureConfig(ctx.defaultDirPerm, opts)
@@ -221,4 +239,20 @@ func resolveLocalWorkingDir(configuredWorkingDir string) string {
 	}
 
 	return configuredWorkingDir
+}
+
+func normalizeFilePathFilename(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return ""
+	}
+	if !filepath.IsAbs(filename) {
+		return filename
+	}
+
+	volume := filepath.VolumeName(filename)
+	filename = strings.TrimPrefix(filename, volume)
+	filename = strings.TrimLeft(filename, `/\`)
+
+	return filename
 }

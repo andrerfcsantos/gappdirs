@@ -43,6 +43,47 @@ func TestTopLevelScopedDirsAndDirParity(t *testing.T) {
 	}
 }
 
+func TestTopLevelScopedFilePathParity(t *testing.T) {
+	setupTopLevelTestEnv(t)
+	appName := "demo_top_level_file_paths"
+	filenames := []string{
+		"settings.yaml",
+		"   ",
+		filepath.Join(string(filepath.Separator), "absolute", "rooted.json"),
+	}
+
+	for _, scope := range testScopes {
+		r := newResolverForScope(scope, appName)
+
+		for _, cat := range testCategories {
+			for _, filename := range filenames {
+				t.Run(fmt.Sprintf("file_paths_%s_%s_%q", scope, cat, filename), func(t *testing.T) {
+					topPaths := callTopFilePaths(scope, cat, appName, filename)
+					resolverPaths := callResolverFilePaths(r, cat, filename)
+					assertValueParity(t, topPaths, resolverPaths)
+				})
+
+				t.Run(fmt.Sprintf("file_path_%s_%s_%q", scope, cat, filename), func(t *testing.T) {
+					topPath := callTopFilePath(scope, cat, appName, filename)
+					resolverPath := callResolverFilePath(r, cat, filename)
+					assertValueParity(t, topPath, resolverPath)
+
+					topPaths := callTopFilePaths(scope, cat, appName, filename)
+					if len(topPaths) == 0 {
+						if topPath != "" {
+							t.Fatalf("expected empty path when no candidate dirs are found, got %q", topPath)
+						}
+						return
+					}
+					if topPath != topPaths[0] {
+						t.Fatalf("expected top path %q to match first candidate %q", topPath, topPaths[0])
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestTopLevelScopedEnsureParity(t *testing.T) {
 	setupTopLevelTestEnv(t)
 	appName := "demo_top_level_ensure"
@@ -438,6 +479,84 @@ func callTopDir(scope Scope, cat category, appName string) string {
 	return ""
 }
 
+func callTopFilePaths(scope Scope, cat category, appName string, filename string) []string {
+	switch scope {
+	case ScopeLocal:
+		switch cat {
+		case categoryData:
+			return LocalDataFilePaths(appName, filename)
+		case categoryConfig:
+			return LocalConfigFilePaths(appName, filename)
+		case categoryLog:
+			return LocalLogFilePaths(appName, filename)
+		case categoryCache:
+			return LocalCacheFilePaths(appName, filename)
+		}
+	case ScopeUser:
+		switch cat {
+		case categoryData:
+			return UserDataFilePaths(appName, filename)
+		case categoryConfig:
+			return UserConfigFilePaths(appName, filename)
+		case categoryLog:
+			return UserLogFilePaths(appName, filename)
+		case categoryCache:
+			return UserCacheFilePaths(appName, filename)
+		}
+	case ScopeSystem:
+		switch cat {
+		case categoryData:
+			return SystemDataFilePaths(appName, filename)
+		case categoryConfig:
+			return SystemConfigFilePaths(appName, filename)
+		case categoryLog:
+			return SystemLogFilePaths(appName, filename)
+		case categoryCache:
+			return SystemCacheFilePaths(appName, filename)
+		}
+	}
+	return nil
+}
+
+func callTopFilePath(scope Scope, cat category, appName string, filename string) string {
+	switch scope {
+	case ScopeLocal:
+		switch cat {
+		case categoryData:
+			return LocalDataFilePath(appName, filename)
+		case categoryConfig:
+			return LocalConfigFilePath(appName, filename)
+		case categoryLog:
+			return LocalLogFilePath(appName, filename)
+		case categoryCache:
+			return LocalCacheFilePath(appName, filename)
+		}
+	case ScopeUser:
+		switch cat {
+		case categoryData:
+			return UserDataFilePath(appName, filename)
+		case categoryConfig:
+			return UserConfigFilePath(appName, filename)
+		case categoryLog:
+			return UserLogFilePath(appName, filename)
+		case categoryCache:
+			return UserCacheFilePath(appName, filename)
+		}
+	case ScopeSystem:
+		switch cat {
+		case categoryData:
+			return SystemDataFilePath(appName, filename)
+		case categoryConfig:
+			return SystemConfigFilePath(appName, filename)
+		case categoryLog:
+			return SystemLogFilePath(appName, filename)
+		case categoryCache:
+			return SystemCacheFilePath(appName, filename)
+		}
+	}
+	return ""
+}
+
 func callTopEnsure(scope Scope, cat category, appName string) (string, error) {
 	switch scope {
 	case ScopeLocal:
@@ -658,6 +777,36 @@ func callResolverDir(r *Resolver, cat category) string {
 		return r.LogDir()
 	case categoryCache:
 		return r.CacheDir()
+	default:
+		return ""
+	}
+}
+
+func callResolverFilePaths(r *Resolver, cat category, filename string) []string {
+	switch cat {
+	case categoryData:
+		return r.DataFilePaths(filename)
+	case categoryConfig:
+		return r.ConfigFilePaths(filename)
+	case categoryLog:
+		return r.LogFilePaths(filename)
+	case categoryCache:
+		return r.CacheFilePaths(filename)
+	default:
+		return nil
+	}
+}
+
+func callResolverFilePath(r *Resolver, cat category, filename string) string {
+	switch cat {
+	case categoryData:
+		return r.DataFilePath(filename)
+	case categoryConfig:
+		return r.ConfigFilePath(filename)
+	case categoryLog:
+		return r.LogFilePath(filename)
+	case categoryCache:
+		return r.CacheFilePath(filename)
 	default:
 		return ""
 	}

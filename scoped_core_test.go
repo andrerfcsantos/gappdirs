@@ -164,6 +164,100 @@ func TestScopedFindFilesAndFile(t *testing.T) {
 	}
 }
 
+func TestScopedFilePathsAndFilePath(t *testing.T) {
+	wd := t.TempDir()
+	localConfig := filepath.Join(wd, ".demo", "config")
+	userConfig := filepath.Join(wd, "user", "config")
+	systemConfig := filepath.Join(wd, "system", "config")
+
+	ctx := buildScopedContext(
+		"demo",
+		ScopeLocal,
+		[]ResolverOption{WithLocalDir(wd)},
+		func(_ string, cat category) ([]string, error) {
+			if cat != categoryConfig {
+				return nil, nil
+			}
+			return []string{userConfig}, nil
+		},
+		func(_ string, cat category) ([]string, error) {
+			if cat != categoryConfig {
+				return nil, nil
+			}
+			return []string{systemConfig}, nil
+		},
+	)
+
+	t.Run("relative filename keeps precedence", func(t *testing.T) {
+		gotPaths := scopedFilePaths(ctx, categoryConfig, "settings.yaml")
+		wantPaths := []string{
+			filepath.Join(localConfig, "settings.yaml"),
+			filepath.Join(userConfig, "settings.yaml"),
+			filepath.Join(systemConfig, "settings.yaml"),
+		}
+		if !reflect.DeepEqual(gotPaths, wantPaths) {
+			t.Fatalf("computed file paths mismatch:\nwant: %#v\ngot:  %#v", wantPaths, gotPaths)
+		}
+
+		gotPath := scopedFilePath(ctx, categoryConfig, "settings.yaml")
+		if gotPath != wantPaths[0] {
+			t.Fatalf("highest-precedence computed file path mismatch: want %q, got %q", wantPaths[0], gotPath)
+		}
+	})
+
+	t.Run("empty filename resolves to directory paths", func(t *testing.T) {
+		gotPaths := scopedFilePaths(ctx, categoryConfig, "   ")
+		wantPaths := []string{
+			localConfig,
+			userConfig,
+			systemConfig,
+		}
+		if !reflect.DeepEqual(gotPaths, wantPaths) {
+			t.Fatalf("computed file paths mismatch for empty filename:\nwant: %#v\ngot:  %#v", wantPaths, gotPaths)
+		}
+
+		gotPath := scopedFilePath(ctx, categoryConfig, "   ")
+		if gotPath != localConfig {
+			t.Fatalf("highest-precedence computed file path mismatch for empty filename: want %q, got %q", localConfig, gotPath)
+		}
+	})
+
+	t.Run("absolute filename is anchored under category dirs", func(t *testing.T) {
+		absolute := filepath.Join(string(filepath.Separator), "absolute", "rooted.yaml")
+		relative := filepath.Join("absolute", "rooted.yaml")
+
+		gotPaths := scopedFilePaths(ctx, categoryConfig, absolute)
+		wantPaths := []string{
+			filepath.Join(localConfig, relative),
+			filepath.Join(userConfig, relative),
+			filepath.Join(systemConfig, relative),
+		}
+		if !reflect.DeepEqual(gotPaths, wantPaths) {
+			t.Fatalf("computed file paths mismatch for absolute filename:\nwant: %#v\ngot:  %#v", wantPaths, gotPaths)
+		}
+	})
+}
+
+func TestScopedFilePathsAndFilePathWhenNoDirs(t *testing.T) {
+	ctx := buildScopedContext(
+		"demo",
+		ScopeUser,
+		nil,
+		func(string, category) ([]string, error) { return nil, errors.New("user provider failed") },
+		func(string, category) ([]string, error) { return nil, errors.New("system provider failed") },
+	)
+
+	gotPaths := scopedFilePaths(ctx, categoryData, "settings.yaml")
+	if len(gotPaths) != 0 {
+		t.Fatalf("expected empty candidate paths when there are no dirs, got %#v", gotPaths)
+	}
+
+	gotPath := scopedFilePath(ctx, categoryData, "settings.yaml")
+	if gotPath != "" {
+		t.Fatalf("expected empty candidate path when there are no dirs, got %q", gotPath)
+	}
+}
+
 func TestWorkingDirResolutionIsDeferredToLocalScope(t *testing.T) {
 	preBuildWD := t.TempDir()
 	runtimeWD := t.TempDir()

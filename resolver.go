@@ -136,6 +136,62 @@ func (r *Resolver) CacheDir() string {
 	return scopedDir(r.ctx, categoryCache)
 }
 
+// DataFilePaths returns all candidate data file paths for filename, in precedence order for the resolver's scope and app name.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func (r *Resolver) DataFilePaths(filename string) []string {
+	return scopedFilePaths(r.ctx, categoryData, filename)
+}
+
+// ConfigFilePaths returns all candidate config file paths for filename, in precedence order for the resolver's scope and app name.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func (r *Resolver) ConfigFilePaths(filename string) []string {
+	return scopedFilePaths(r.ctx, categoryConfig, filename)
+}
+
+// LogFilePaths returns all candidate log file paths for filename, in precedence order for the resolver's scope and app name.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func (r *Resolver) LogFilePaths(filename string) []string {
+	return scopedFilePaths(r.ctx, categoryLog, filename)
+}
+
+// CacheFilePaths returns all candidate cache file paths for filename, in precedence order for the resolver's scope and app name.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func (r *Resolver) CacheFilePaths(filename string) []string {
+	return scopedFilePaths(r.ctx, categoryCache, filename)
+}
+
+// DataFilePath returns the single highest-precedence data file path for filename for the resolver's scope and app name.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func (r *Resolver) DataFilePath(filename string) string {
+	return scopedFilePath(r.ctx, categoryData, filename)
+}
+
+// ConfigFilePath returns the single highest-precedence config file path for filename for the resolver's scope and app name.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func (r *Resolver) ConfigFilePath(filename string) string {
+	return scopedFilePath(r.ctx, categoryConfig, filename)
+}
+
+// LogFilePath returns the single highest-precedence log file path for filename for the resolver's scope and app name.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func (r *Resolver) LogFilePath(filename string) string {
+	return scopedFilePath(r.ctx, categoryLog, filename)
+}
+
+// CacheFilePath returns the single highest-precedence cache file path for filename for the resolver's scope and app name.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func (r *Resolver) CacheFilePath(filename string) string {
+	return scopedFilePath(r.ctx, categoryCache, filename)
+}
+
 func sanitizeAppName(appName string) string {
 	appName = strings.TrimSpace(appName)
 	if appName == "" {

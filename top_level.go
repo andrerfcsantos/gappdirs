@@ -14,6 +14,16 @@ func topLevelScopedDir(appName string, scope Scope, cat category) string {
 	return scopedDir(ctx, cat)
 }
 
+func topLevelScopedFilePaths(appName string, scope Scope, cat category, filename string) []string {
+	ctx := topLevelScopedContext(appName, scope)
+	return scopedFilePaths(ctx, cat, filename)
+}
+
+func topLevelScopedFilePath(appName string, scope Scope, cat category, filename string) string {
+	ctx := topLevelScopedContext(appName, scope)
+	return scopedFilePath(ctx, cat, filename)
+}
+
 func topLevelScopedEnsureDir(appName string, scope Scope, cat category, opts ...EnsureOption) (string, error) {
 	ctx := topLevelScopedContext(appName, scope)
 	return scopedEnsureDir(ctx, cat, opts...)
@@ -224,6 +234,174 @@ func SystemLogDir(appName string) string {
 // Use EnsureSystemCacheDir to ensure the highest-precedence cache directory exists and get its path.
 func SystemCacheDir(appName string) string {
 	return topLevelScopedDir(appName, ScopeSystem, categoryCache)
+}
+
+// LocalDataFilePaths returns all candidate data file paths for filename, in precedence order for appName selected by local, user, then system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func LocalDataFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeLocal, categoryData, filename)
+}
+
+// LocalConfigFilePaths returns all candidate config file paths for filename, in precedence order for appName selected by local, user, then system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func LocalConfigFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeLocal, categoryConfig, filename)
+}
+
+// LocalLogFilePaths returns all candidate log file paths for filename, in precedence order for appName selected by local, user, then system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func LocalLogFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeLocal, categoryLog, filename)
+}
+
+// LocalCacheFilePaths returns all candidate cache file paths for filename, in precedence order for appName selected by local, user, then system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func LocalCacheFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeLocal, categoryCache, filename)
+}
+
+// UserDataFilePaths returns all candidate data file paths for filename, in precedence order for appName selected by user, then system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func UserDataFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeUser, categoryData, filename)
+}
+
+// UserConfigFilePaths returns all candidate config file paths for filename, in precedence order for appName selected by user, then system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func UserConfigFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeUser, categoryConfig, filename)
+}
+
+// UserLogFilePaths returns all candidate log file paths for filename, in precedence order for appName selected by user, then system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func UserLogFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeUser, categoryLog, filename)
+}
+
+// UserCacheFilePaths returns all candidate cache file paths for filename, in precedence order for appName selected by user, then system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func UserCacheFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeUser, categoryCache, filename)
+}
+
+// SystemDataFilePaths returns all candidate data file paths for filename, in precedence order for appName selected by system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func SystemDataFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeSystem, categoryData, filename)
+}
+
+// SystemConfigFilePaths returns all candidate config file paths for filename, in precedence order for appName selected by system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func SystemConfigFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeSystem, categoryConfig, filename)
+}
+
+// SystemLogFilePaths returns all candidate log file paths for filename, in precedence order for appName selected by system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func SystemLogFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeSystem, categoryLog, filename)
+}
+
+// SystemCacheFilePaths returns all candidate cache file paths for filename, in precedence order for appName selected by system precedence.
+//
+// The paths returned are computed candidates and are not guaranteed to exist on the filesystem.
+func SystemCacheFilePaths(appName string, filename string) []string {
+	return topLevelScopedFilePaths(appName, ScopeSystem, categoryCache, filename)
+}
+
+// LocalDataFilePath returns the single highest-precedence data file path for filename for appName selected by local, user, then system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func LocalDataFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeLocal, categoryData, filename)
+}
+
+// LocalConfigFilePath returns the single highest-precedence config file path for filename for appName selected by local, user, then system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func LocalConfigFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeLocal, categoryConfig, filename)
+}
+
+// LocalLogFilePath returns the single highest-precedence log file path for filename for appName selected by local, user, then system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func LocalLogFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeLocal, categoryLog, filename)
+}
+
+// LocalCacheFilePath returns the single highest-precedence cache file path for filename for appName selected by local, user, then system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func LocalCacheFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeLocal, categoryCache, filename)
+}
+
+// UserDataFilePath returns the single highest-precedence data file path for filename for appName selected by user, then system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func UserDataFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeUser, categoryData, filename)
+}
+
+// UserConfigFilePath returns the single highest-precedence config file path for filename for appName selected by user, then system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func UserConfigFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeUser, categoryConfig, filename)
+}
+
+// UserLogFilePath returns the single highest-precedence log file path for filename for appName selected by user, then system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func UserLogFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeUser, categoryLog, filename)
+}
+
+// UserCacheFilePath returns the single highest-precedence cache file path for filename for appName selected by user, then system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func UserCacheFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeUser, categoryCache, filename)
+}
+
+// SystemDataFilePath returns the single highest-precedence data file path for filename for appName selected by system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func SystemDataFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeSystem, categoryData, filename)
+}
+
+// SystemConfigFilePath returns the single highest-precedence config file path for filename for appName selected by system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func SystemConfigFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeSystem, categoryConfig, filename)
+}
+
+// SystemLogFilePath returns the single highest-precedence log file path for filename for appName selected by system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func SystemLogFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeSystem, categoryLog, filename)
+}
+
+// SystemCacheFilePath returns the single highest-precedence cache file path for filename for appName selected by system precedence.
+//
+// The path returned is a computed candidate and is not guaranteed to exist on the filesystem.
+func SystemCacheFilePath(appName string, filename string) string {
+	return topLevelScopedFilePath(appName, ScopeSystem, categoryCache, filename)
 }
 
 // EnsureLocalDataDir ensures the highest-precedence data directory for appName and returns its path.
