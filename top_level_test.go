@@ -279,6 +279,90 @@ func TestTopLevelErrorParity(t *testing.T) {
 	}
 }
 
+func TestTopLevelScopeForPathParity(t *testing.T) {
+	setupTopLevelTestEnv(t)
+	appName := "demo_top_level_scope_lookup"
+	localResolver := NewLocalResolver(appName)
+	userResolver := NewUserResolver(appName)
+	systemResolver := NewSystemResolver(appName)
+
+	localPath := filepath.Join(localResolver.ConfigDir(), "nested", "settings.yaml")
+	userPath := filepath.Join(userResolver.DataDir(), "records", "state.db")
+	systemPath := filepath.Join(systemResolver.CacheDir(), "assets", "cache.bin")
+	appRootPath := filepath.Dir(localResolver.ConfigDir())
+	outsidePath := filepath.Join(t.TempDir(), "outside.txt")
+
+	cases := []struct {
+		name      string
+		path      string
+		wantScope Scope
+		wantOK    bool
+	}{
+		{name: "local_nested_file", path: localPath, wantScope: ScopeLocal, wantOK: true},
+		{name: "user_nested_file", path: userPath, wantScope: ScopeUser, wantOK: true},
+		{name: "system_nested_file", path: systemPath, wantScope: ScopeSystem, wantOK: true},
+		{name: "app_root_not_category", path: appRootPath, wantScope: ScopeLocal, wantOK: false},
+		{name: "outside_path", path: outsidePath, wantScope: ScopeLocal, wantOK: false},
+		{name: "empty_path", path: "   ", wantScope: ScopeLocal, wantOK: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			topScope, topOK := ScopeForPath(appName, tc.path)
+			resolverScope, resolverOK := localResolver.ScopeForPath(tc.path)
+
+			if topOK != resolverOK {
+				t.Fatalf("scope match parity mismatch:\nresolver: %t\ntop:      %t", resolverOK, topOK)
+			}
+			if topOK && topScope != resolverScope {
+				t.Fatalf("scope parity mismatch:\nresolver: %s\ntop:      %s", resolverScope, topScope)
+			}
+
+			if topOK != tc.wantOK {
+				t.Fatalf("match mismatch: want %t, got %t", tc.wantOK, topOK)
+			}
+			if topOK && topScope != tc.wantScope {
+				t.Fatalf("scope mismatch: want %s, got %s", tc.wantScope, topScope)
+			}
+		})
+	}
+
+	t.Run("relative_path_normalization", func(t *testing.T) {
+		currentWD, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("getwd: %v", err)
+		}
+		relative, err := filepath.Rel(currentWD, userPath)
+		if err != nil {
+			t.Fatalf("relative path from %q to %q: %v", currentWD, userPath, err)
+		}
+
+		topScope, topOK := ScopeForPath(appName, relative)
+		resolverScope, resolverOK := localResolver.ScopeForPath(relative)
+		if topOK != resolverOK {
+			t.Fatalf("scope match parity mismatch:\nresolver: %t\ntop:      %t", resolverOK, topOK)
+		}
+		if topOK && topScope != resolverScope {
+			t.Fatalf("scope parity mismatch:\nresolver: %s\ntop:      %s", resolverScope, topScope)
+		}
+
+		if !topOK || topScope != ScopeUser {
+			t.Fatalf("relative path lookup mismatch: want (%s, true), got (%s, %t)", ScopeUser, topScope, topOK)
+		}
+	})
+
+	t.Run("sanitized_app_name", func(t *testing.T) {
+		unsanitizedAppName := "A/B Demo"
+		rawResolver := NewLocalResolver(unsanitizedAppName)
+		rawPath := filepath.Join(rawResolver.LogDir(), "trace.log")
+
+		scope, ok := ScopeForPath(unsanitizedAppName, rawPath)
+		if !ok || scope != ScopeLocal {
+			t.Fatalf("sanitized app scope mismatch: want (%s, true), got (%s, %t)", ScopeLocal, scope, ok)
+		}
+	})
+}
+
 func setupTopLevelTestEnv(t *testing.T) {
 	t.Helper()
 

@@ -438,3 +438,194 @@ func TestScopedDirsReturnsEmptyWhenAllProvidersFail(t *testing.T) {
 		t.Fatalf("expected empty dir when both providers fail, got %q", gotDir)
 	}
 }
+
+func TestScopedScopeForPath(t *testing.T) {
+	base := t.TempDir()
+	localWD := filepath.Join(base, "workspace")
+
+	userByCategory := map[category]string{
+		categoryData:   filepath.Join(base, "user", "data"),
+		categoryConfig: filepath.Join(base, "user", "config"),
+		categoryLog:    filepath.Join(base, "user", "log"),
+		categoryCache:  filepath.Join(base, "user", "cache"),
+	}
+	systemByCategory := map[category]string{
+		categoryData:   filepath.Join(base, "system", "data"),
+		categoryConfig: filepath.Join(base, "system", "config"),
+		categoryLog:    filepath.Join(base, "system", "log"),
+		categoryCache:  filepath.Join(base, "system", "cache"),
+	}
+
+	userFn := func(_ string, cat category) ([]string, error) {
+		return []string{userByCategory[cat]}, nil
+	}
+	systemFn := func(_ string, cat category) ([]string, error) {
+		return []string{systemByCategory[cat]}, nil
+	}
+
+	ctxLocal := buildScopedContext("demo", ScopeLocal, []ResolverOption{WithLocalDir(localWD)}, userFn, systemFn)
+	ctxUser := buildScopedContext("demo", ScopeUser, []ResolverOption{WithLocalDir(localWD)}, userFn, systemFn)
+	ctxSystem := buildScopedContext("demo", ScopeSystem, []ResolverOption{WithLocalDir(localWD)}, userFn, systemFn)
+
+	localNestedFile := filepath.Join(localWD, ".demo", "config", "nested", "settings.yaml")
+	userNestedFile := filepath.Join(userByCategory[categoryData], "nested", "data.db")
+	systemDir := systemByCategory[categoryCache]
+
+	scope, ok := scopedScopeForPath(ctxLocal, localNestedFile)
+	if !ok || scope != ScopeLocal {
+		t.Fatalf("local match mismatch: want (%s, true), got (%s, %t)", ScopeLocal, scope, ok)
+	}
+
+	scope, ok = scopedScopeForPath(ctxLocal, userNestedFile)
+	if !ok || scope != ScopeUser {
+		t.Fatalf("user match mismatch: want (%s, true), got (%s, %t)", ScopeUser, scope, ok)
+	}
+
+	scope, ok = scopedScopeForPath(ctxLocal, systemDir)
+	if !ok || scope != ScopeSystem {
+		t.Fatalf("system dir match mismatch: want (%s, true), got (%s, %t)", ScopeSystem, scope, ok)
+	}
+
+	_, ok = scopedScopeForPath(ctxLocal, filepath.Join(localWD, ".demo"))
+	if ok {
+		t.Fatalf("app root must not match category dirs")
+	}
+
+	_, ok = scopedScopeForPath(ctxLocal, filepath.Join(base, "outside", "file.txt"))
+	if ok {
+		t.Fatalf("unrelated paths must not match")
+	}
+
+	_, ok = scopedScopeForPath(ctxLocal, "   ")
+	if ok {
+		t.Fatalf("empty path must not match")
+	}
+
+	_, ok = scopedScopeForPath(ctxUser, localNestedFile)
+	if ok {
+		t.Fatalf("user scope should not match local paths")
+	}
+
+	scope, ok = scopedScopeForPath(ctxUser, userNestedFile)
+	if !ok || scope != ScopeUser {
+		t.Fatalf("user scope mismatch: want (%s, true), got (%s, %t)", ScopeUser, scope, ok)
+	}
+
+	scope, ok = scopedScopeForPath(ctxUser, systemDir)
+	if !ok || scope != ScopeSystem {
+		t.Fatalf("user fallback to system mismatch: want (%s, true), got (%s, %t)", ScopeSystem, scope, ok)
+	}
+
+	_, ok = scopedScopeForPath(ctxSystem, userNestedFile)
+	if ok {
+		t.Fatalf("system scope should not match user paths")
+	}
+
+	scope, ok = scopedScopeForPath(ctxSystem, systemDir)
+	if !ok || scope != ScopeSystem {
+		t.Fatalf("system scope mismatch: want (%s, true), got (%s, %t)", ScopeSystem, scope, ok)
+	}
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(base); err != nil {
+		t.Fatalf("chdir %q: %v", base, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWD)
+	})
+
+	runtimeBase, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get runtime wd: %v", err)
+	}
+	ctxRelative := buildScopedContext(
+		"demo",
+		ScopeLocal,
+		[]ResolverOption{WithLocalDir(filepath.Join(runtimeBase, "workspace"))},
+		func(_ string, cat category) ([]string, error) {
+			return []string{filepath.Join(runtimeBase, "user", categoryDirName(cat))}, nil
+		},
+		func(_ string, cat category) ([]string, error) {
+			return []string{filepath.Join(runtimeBase, "system", categoryDirName(cat))}, nil
+		},
+	)
+
+	scope, ok = scopedScopeForPath(ctxRelative, filepath.Join("user", "data", "nested", "data.db"))
+	if !ok || scope != ScopeUser {
+		t.Fatalf("relative path scope mismatch: want (%s, true), got (%s, %t)", ScopeUser, scope, ok)
+	}
+}
+
+func TestScopedScopeForPathOverlapPrecedence(t *testing.T) {
+	base := t.TempDir()
+	localWD := filepath.Join(base, "project")
+
+	ctxLocal := buildScopedContext(
+		"demo",
+		ScopeLocal,
+		[]ResolverOption{WithLocalDir(localWD)},
+		func(_ string, cat category) ([]string, error) {
+			if cat != categoryData {
+				return nil, nil
+			}
+			return []string{filepath.Join(localWD, ".demo")}, nil
+		},
+		func(_ string, _ category) ([]string, error) { return nil, nil },
+	)
+
+	overlappingLocalAndUser := filepath.Join(localWD, ".demo", "data", "records", "item.db")
+	scope, ok := scopedScopeForPath(ctxLocal, overlappingLocalAndUser)
+	if !ok || scope != ScopeLocal {
+		t.Fatalf("overlap precedence mismatch: want (%s, true), got (%s, %t)", ScopeLocal, scope, ok)
+	}
+
+	ctxUser := buildScopedContext(
+		"demo",
+		ScopeUser,
+		nil,
+		func(_ string, cat category) ([]string, error) {
+			if cat != categoryData {
+				return nil, nil
+			}
+			return []string{filepath.Join(base, "shared")}, nil
+		},
+		func(_ string, cat category) ([]string, error) {
+			if cat != categoryData {
+				return nil, nil
+			}
+			return []string{filepath.Join(base, "shared", "nested")}, nil
+		},
+	)
+
+	overlappingUserAndSystem := filepath.Join(base, "shared", "nested", "cache.bin")
+	scope, ok = scopedScopeForPath(ctxUser, overlappingUserAndSystem)
+	if !ok || scope != ScopeUser {
+		t.Fatalf("user/system overlap precedence mismatch: want (%s, true), got (%s, %t)", ScopeUser, scope, ok)
+	}
+}
+
+func TestScopedScopeForPathIgnoresProviderErrors(t *testing.T) {
+	base := t.TempDir()
+	systemData := filepath.Join(base, "system", "data")
+
+	ctx := buildScopedContext(
+		"demo",
+		ScopeUser,
+		nil,
+		func(_ string, _ category) ([]string, error) { return nil, errors.New("user provider failed") },
+		func(_ string, cat category) ([]string, error) {
+			if cat != categoryData {
+				return nil, nil
+			}
+			return []string{systemData}, nil
+		},
+	)
+
+	scope, ok := scopedScopeForPath(ctx, filepath.Join(systemData, "records", "item.db"))
+	if !ok || scope != ScopeSystem {
+		t.Fatalf("provider error fallback mismatch: want (%s, true), got (%s, %t)", ScopeSystem, scope, ok)
+	}
+}

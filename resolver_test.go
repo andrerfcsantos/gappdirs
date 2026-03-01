@@ -221,6 +221,59 @@ func TestDirMethods(t *testing.T) {
 	}
 }
 
+func TestResolverScopeForPath(t *testing.T) {
+	wd := t.TempDir()
+	userData := filepath.Join(wd, "user", "data")
+	systemData := filepath.Join(wd, "system", "data")
+
+	userFn := func(string, category) ([]string, error) {
+		return []string{userData}, nil
+	}
+	systemFn := func(string, category) ([]string, error) {
+		return []string{systemData}, nil
+	}
+
+	localResolver := newScopedResolver("demo", ScopeLocal, []ResolverOption{WithLocalDir(wd)}, userFn, systemFn)
+	userResolver := newScopedResolver("demo", ScopeUser, []ResolverOption{WithLocalDir(wd)}, userFn, systemFn)
+	systemResolver := newScopedResolver("demo", ScopeSystem, []ResolverOption{WithLocalDir(wd)}, userFn, systemFn)
+
+	localPath := filepath.Join(wd, ".demo", "data", "nested", "item.db")
+	userPath := filepath.Join(userData, "nested", "user.db")
+	systemPath := filepath.Join(systemData, "nested", "system.db")
+
+	scope, ok := localResolver.ScopeForPath(localPath)
+	if !ok || scope != ScopeLocal {
+		t.Fatalf("local scope mismatch: want (%s, true), got (%s, %t)", ScopeLocal, scope, ok)
+	}
+
+	_, ok = userResolver.ScopeForPath(localPath)
+	if ok {
+		t.Fatalf("user resolver should not match local path %q", localPath)
+	}
+
+	scope, ok = userResolver.ScopeForPath(userPath)
+	if !ok || scope != ScopeUser {
+		t.Fatalf("user scope mismatch: want (%s, true), got (%s, %t)", ScopeUser, scope, ok)
+	}
+
+	_, ok = systemResolver.ScopeForPath(userPath)
+	if ok {
+		t.Fatalf("system resolver should not match user path %q", userPath)
+	}
+
+	scope, ok = systemResolver.ScopeForPath(systemPath)
+	if !ok || scope != ScopeSystem {
+		t.Fatalf("system scope mismatch: want (%s, true), got (%s, %t)", ScopeSystem, scope, ok)
+	}
+
+	sanitizedResolver := newScopedResolver("A/B Demo", ScopeLocal, []ResolverOption{WithLocalDir(wd)}, userFn, systemFn)
+	sanitizedPath := filepath.Join(wd, ".A_B_Demo", "cache", "cache.db")
+	scope, ok = sanitizedResolver.ScopeForPath(sanitizedPath)
+	if !ok || scope != ScopeLocal {
+		t.Fatalf("sanitized local scope mismatch: want (%s, true), got (%s, %t)", ScopeLocal, scope, ok)
+	}
+}
+
 func mustResolver(t *testing.T, scope Scope, workingDir string, user map[category][]string, system map[category][]string, extraOpts ...ResolverOption) *Resolver {
 	return mustResolverWithLocalDirs(t, scope, []string{workingDir}, user, system, extraOpts...)
 }

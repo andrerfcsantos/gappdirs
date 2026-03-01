@@ -256,3 +256,91 @@ func normalizeFilePathFilename(filename string) string {
 
 	return filename
 }
+
+func scopedScopeForPath(ctx scopedContext, inputPath string) (Scope, bool) {
+	normalizedPath, ok := normalizeScopeLookupPath(inputPath)
+	if !ok {
+		return ScopeLocal, false
+	}
+
+	for _, scopeLayer := range scopeLookupLayers(ctx.scope) {
+		dirs := scopedLayerDirs(ctx, scopeLayer)
+		for _, dir := range dirs {
+			if isPathWithinBase(normalizedPath, dir) {
+				return scopeLayer, true
+			}
+		}
+	}
+
+	return ScopeLocal, false
+}
+
+func scopeLookupLayers(scope Scope) []Scope {
+	switch scope {
+	case ScopeLocal:
+		return []Scope{ScopeLocal, ScopeUser, ScopeSystem}
+	case ScopeUser:
+		return []Scope{ScopeUser, ScopeSystem}
+	case ScopeSystem:
+		return []Scope{ScopeSystem}
+	default:
+		return []Scope{ScopeUser, ScopeSystem}
+	}
+}
+
+func scopedLayerDirs(ctx scopedContext, scopeLayer Scope) []string {
+	categories := []category{categoryData, categoryConfig, categoryLog, categoryCache}
+	candidates := make([]string, 0, len(categories))
+
+	for _, cat := range categories {
+		switch scopeLayer {
+		case ScopeLocal:
+			candidates = append(candidates, scopedLocalDirs(ctx, cat)...)
+		case ScopeUser:
+			userDirs, _ := ctx.userDirsFn(ctx.appName, cat)
+			candidates = append(candidates, userDirs...)
+		case ScopeSystem:
+			systemDirs, _ := ctx.systemDirsFn(ctx.appName, cat)
+			candidates = append(candidates, systemDirs...)
+		}
+	}
+
+	return normalizePaths(candidates)
+}
+
+func normalizeScopeLookupPath(path string) (string, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false
+	}
+
+	normalizedPath, err := tryNormalizeAbsolutePath(path)
+	if err != nil {
+		return filepath.Clean(path), true
+	}
+	return normalizedPath, true
+}
+
+func isPathWithinBase(path string, base string) bool {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return false
+	}
+	if path == base {
+		return true
+	}
+
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	if rel == ".." {
+		return false
+	}
+
+	parentPrefix := ".." + string(filepath.Separator)
+	return !strings.HasPrefix(rel, parentPrefix)
+}
